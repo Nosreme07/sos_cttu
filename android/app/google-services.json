@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "347912771449",
+    "project_id": "sos-cttu",
+    "storage_bucket": "sos-cttu.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:347912771449:android:3242589c91fa30e8cc41a8",
+        "android_client_info": {
+          "package_name": "com.example.sos_cttu"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAZbCk-jLcSKBAZXz2sZuaWeX_6XP6Tybo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
