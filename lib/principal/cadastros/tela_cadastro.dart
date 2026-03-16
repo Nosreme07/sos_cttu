@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:sos_cttu/principal/cadastros/lista_integrantes.dart';
 import 'lista_usuarios.dart';
 import 'lista_empresas.dart';
 import 'lista_veiculos.dart';
+import 'lista_falhas.dart';
+import 'lista_origens.dart';
+import 'lista_materiais.dart';
+import 'lista_semaforos.dart';
 import '../../widgets/menu_usuario.dart';
 
 class TelaCadastros extends StatelessWidget {
@@ -64,55 +69,61 @@ class TelaCadastros extends StatelessWidget {
                       },
                     ),
 
+                   // O BOTÃO DE SEMÁFOROS ATUALIZADO
                     _buildCard(
-                      context,
-                      'Semáforos',
-                      const Icon(
-                        Icons.traffic,
-                        size: 50,
-                        color: Color(0xFF333A4A),
-                      ),
+                      context, 
+                      'Semáforos', 
+                      Image.asset('assets/images/semaforo.png', width: 50, height: 50), 
                       () {
-                        print("Clicou em Semáforos");
-                      },
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => const ListaSemaforos()),
+                        );
+                      }
                     ),
 
+                    // O BOTÃO DE FALHAS ATUALIZADO
                     _buildCard(
-                      context,
-                      'Falhas',
-                      const Icon(
-                        Icons.warning_amber_rounded,
-                        size: 50,
-                        color: Color(0xFF333A4A),
-                      ),
+                      context, 
+                      'Falhas', 
+                      Image.asset('assets/images/falhas.png', width: 50, height: 50), 
                       () {
-                        print("Clicou em Falhas");
-                      },
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => const ListaFalhas()),
+                        );
+                      }
                     ),
 
+                    // O BOTÃO DE ORIGEM ATUALIZADO
                     _buildCard(
-                      context,
-                      'Origem',
-                      const Icon(
-                        Icons.list_alt,
-                        size: 50,
-                        color: Color(0xFF333A4A),
-                      ),
+                      context, 
+                      'Origem', 
+                      Image.asset('assets/images/origem.png', width: 50, height: 50), 
                       () {
-                        print("Clicou em Origem");
-                      },
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => const ListaOrigens()),
+                        );
+                      }
                     ),
 
+                    // O BOTÃO DE INTEGRANTES ATUALIZADO
                     _buildCard(
                       context,
                       'Integrantes',
-                      const Icon(
-                        Icons.engineering,
-                        size: 50,
-                        color: Color(0xFF333A4A),
+                      Image.asset(
+                        'assets/images/integrantes.png',
+                        width: 50,
+                        height: 50,
                       ),
                       () {
-                        print("Clicou em Integrantes");
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const ListaIntegrantes(),
+                          ),
+                        );
                       },
                     ),
 
@@ -134,17 +145,18 @@ class TelaCadastros extends StatelessWidget {
                         );
                       },
                     ),
+
+                    // O BOTÃO DE MATERIAIS ATUALIZADO
                     _buildCard(
-                      context,
-                      'Materiais',
-                      const Icon(
-                        Icons.inventory,
-                        size: 50,
-                        color: Color(0xFF333A4A),
-                      ),
+                      context, 
+                      'Materiais', 
+                      Image.asset('assets/images/materiais.png', width: 50, height: 50), 
                       () {
-                        print("Clicou em Materiais");
-                      },
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => const ListaMateriais()),
+                        );
+                      }
                     ),
 
                     // 2. O BOTÃO DE EMPRESA ATUALIZADO

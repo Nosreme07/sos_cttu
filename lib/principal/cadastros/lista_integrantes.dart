@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/services.dart';
-import 'package:brasil_fields/brasil_fields.dart'; // Para a máscara da Placa
+import 'package:flutter/services.dart'; 
+import 'package:brasil_fields/brasil_fields.dart'; 
 
 // Importações para Exportação (PDF e CSV)
 import 'package:pdf/pdf.dart';
@@ -11,23 +11,26 @@ import 'package:printing/printing.dart';
 import 'package:csv/csv.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../widgets/menu_usuario.dart';
+import '../../widgets/menu_usuario.dart'; 
 
-class ListaVeiculos extends StatefulWidget {
-  const ListaVeiculos({super.key});
+class ListaIntegrantes extends StatefulWidget {
+  const ListaIntegrantes({super.key});
 
   @override
-  State<ListaVeiculos> createState() => _ListaVeiculosState();
+  State<ListaIntegrantes> createState() => _ListaIntegrantesState();
 }
 
-class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProviderStateMixin {
-  // Lista de tipos de veículos
-  final List<String> _tiposVeiculo = [
-    'Moto',
-    'Carro Passeio',
-    'Carro com Cesto',
-    'Pick-up',
-    'Caminhão Munck',
+class _ListaIntegrantesState extends State<ListaIntegrantes> with SingleTickerProviderStateMixin {
+  // Lista fixa de funções
+  final List<String> _funcoes = [
+    'VISTORIADOR',
+    'AUXILIAR DE ELETRICISTA',
+    'ELETRICISTA',
+    'MOTORISTA DE CAMINHÃO',
+    'OPERADOR DA CENTRAL',
+    'SUPERVISÃO DA CENTRAL',
+    'SUPERVISÃO TÉCNICA',
+    'COORDENAÇÃO TÉCNICA'
   ];
 
   late TabController _tabController;
@@ -50,13 +53,13 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
     super.dispose();
   }
 
-  // --- Função para Excluir Veículo ---
-  Future<void> _deletarVeiculo(String docId, String placa) async {
+  // --- Função para Excluir Integrante ---
+  Future<void> _deletarIntegrante(String docId, String nome) async {
     bool confirmar = await showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Excluir Veículo'),
-        content: Text('Tem certeza que deseja excluir o veículo placa $placa?'),
+        title: const Text('Excluir Integrante'),
+        content: Text('Tem certeza que deseja excluir o integrante $nome?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar', style: TextStyle(color: Colors.grey))),
           ElevatedButton(
@@ -70,8 +73,8 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
 
     if (confirmar) {
       try {
-        await FirebaseFirestore.instance.collection('veiculos').doc(docId).delete();
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Veículo excluído!'), backgroundColor: Colors.green));
+        await FirebaseFirestore.instance.collection('integrantes').doc(docId).delete();
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Integrante excluído!'), backgroundColor: Colors.green));
       } catch (e) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao excluir.'), backgroundColor: Colors.red));
       }
@@ -81,18 +84,17 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
   // --- Função que abre o MODAL para ADICIONAR ou EDITAR ---
   void _abrirModalFormulario({String? docId, Map<String, dynamic>? dadosAtuais}) {
     final formKey = GlobalKey<FormState>();
-    final marcaController = TextEditingController(text: dadosAtuais?['marca'] ?? '');
-    final modeloController = TextEditingController(text: dadosAtuais?['modelo'] ?? '');
-    final placaController = TextEditingController(text: dadosAtuais?['placa'] ?? '');
+    final nomeController = TextEditingController(text: dadosAtuais?['nomeCompleto'] ?? '');
+    final contatoController = TextEditingController(text: dadosAtuais?['contato'] ?? '');
     final empresaController = TextEditingController(text: dadosAtuais?['empresa'] ?? '');
-    String? tipoSelecionado = dadosAtuais?['tipo'];
-
+    String? funcaoSelecionada = dadosAtuais?['funcao'];
+    
     bool estaCarregando = false;
     bool isEditando = docId != null;
 
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
+      isScrollControlled: true, 
       backgroundColor: Colors.transparent,
       builder: (context) {
         return StatefulBuilder(
@@ -113,39 +115,36 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          isEditando ? 'Editar Veículo' : 'Novo Veículo',
+                          isEditando ? 'Editar Integrante' : 'Novo Integrante',
                           style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 16),
 
                         TextFormField(
-                          controller: placaController,
-                          decoration: const InputDecoration(labelText: 'Placa *', border: OutlineInputBorder(), prefixIcon: Icon(Icons.pin)),
-                          textCapitalization: TextCapitalization.characters,
-                          inputFormatters: [PlacaVeiculoInputFormatter()],
-                          validator: (value) => value == null || value.trim().isEmpty ? 'A placa é obrigatória' : null,
+                          controller: nomeController,
+                          decoration: const InputDecoration(labelText: 'Nome Completo *', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person)),
+                          validator: (value) => value == null || value.trim().isEmpty ? 'Obrigatório' : null,
                         ),
                         const SizedBox(height: 12),
 
                         DropdownButtonFormField<String>(
-                          decoration: const InputDecoration(labelText: 'Tipo de Veículo *', border: OutlineInputBorder(), prefixIcon: Icon(Icons.directions_car)),
-                          value: tipoSelecionado,
-                          items: _tiposVeiculo.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                          onChanged: (val) => setStateModal(() => tipoSelecionado = val),
-                          validator: (value) => value == null ? 'Obrigatório' : null,
+                          decoration: const InputDecoration(labelText: 'Função', border: OutlineInputBorder(), prefixIcon: Icon(Icons.work)),
+                          value: funcaoSelecionada,
+                          isExpanded: true, 
+                          items: _funcoes.map((f) => DropdownMenuItem(value: f, child: Text(f, overflow: TextOverflow.ellipsis))).toList(),
+                          onChanged: (val) => setStateModal(() => funcaoSelecionada = val),
                         ),
                         const SizedBox(height: 12),
 
                         TextFormField(
-                          controller: marcaController,
-                          decoration: const InputDecoration(labelText: 'Marca', border: OutlineInputBorder(), prefixIcon: Icon(Icons.branding_watermark)),
-                        ),
-                        const SizedBox(height: 12),
-
-                        TextFormField(
-                          controller: modeloController,
-                          decoration: const InputDecoration(labelText: 'Modelo', border: OutlineInputBorder(), prefixIcon: Icon(Icons.car_repair)),
+                          controller: contatoController,
+                          decoration: const InputDecoration(labelText: 'Contato (Telefone/Celular)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.phone)),
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            TelefoneInputFormatter(), 
+                          ],
                         ),
                         const SizedBox(height: 12),
 
@@ -163,23 +162,23 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
                           onPressed: estaCarregando ? null : () async {
                             if (formKey.currentState!.validate()) {
                               setStateModal(() => estaCarregando = true);
+
                               try {
-                                final dadosVeiculo = {
-                                  'placa': placaController.text.trim().toUpperCase(),
-                                  'tipo': tipoSelecionado,
-                                  'marca': marcaController.text.trim().toUpperCase(),
-                                  'modelo': modeloController.text.trim().toUpperCase(),
+                                final dadosIntegrante = {
+                                  'nomeCompleto': nomeController.text.trim().toUpperCase(),
+                                  'funcao': funcaoSelecionada, 
+                                  'contato': contatoController.text.trim(),
                                   'empresa': empresaController.text.trim().toUpperCase(),
                                   'dataAtualizacao': FieldValue.serverTimestamp(),
                                 };
 
                                 if (isEditando) {
-                                  await FirebaseFirestore.instance.collection('veiculos').doc(docId).update(dadosVeiculo);
+                                  await FirebaseFirestore.instance.collection('integrantes').doc(docId).update(dadosIntegrante);
                                   if (mounted) Navigator.pop(context);
                                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Atualizado com sucesso!'), backgroundColor: Colors.green));
                                 } else {
-                                  dadosVeiculo['dataCadastro'] = FieldValue.serverTimestamp();
-                                  await FirebaseFirestore.instance.collection('veiculos').add(dadosVeiculo);
+                                  dadosIntegrante['dataCadastro'] = FieldValue.serverTimestamp(); 
+                                  await FirebaseFirestore.instance.collection('integrantes').add(dadosIntegrante);
                                   if (mounted) Navigator.pop(context);
                                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Criado com sucesso!'), backgroundColor: Colors.green));
                                 }
@@ -239,15 +238,15 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
         },
         build: (pw.Context context) {
           List<pw.Widget> conteudo = [
-            pw.Text('Relatório de Veículos Cadastrados', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+            pw.Text('Relatório de Integrantes', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
             pw.SizedBox(height: 20),
           ];
 
-          for (String tipo in _tiposVeiculo) {
-            final grupoDocs = docs.where((d) => (d.data() as Map<String, dynamic>)['tipo'] == tipo).toList();
+          for (String funcao in _funcoes) {
+            final grupoDocs = docs.where((d) => (d.data() as Map<String, dynamic>)['funcao'] == funcao).toList();
             if (grupoDocs.isEmpty) continue; 
             
-            conteudo.add(pw.Text('Tipo: $tipo', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey800)));
+            conteudo.add(pw.Text('Função: $funcao', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey800)));
             conteudo.add(pw.SizedBox(height: 8));
             conteudo.add(
               pw.TableHelper.fromTextArray(
@@ -256,11 +255,10 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
                 headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
                 headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey800),
                 data: <List<String>>[
-                  <String>['Placa', 'Marca/Modelo', 'Empresa'],
+                  <String>['Nome', 'Empresa', 'Contato'],
                   ...grupoDocs.map((doc) {
                     var d = doc.data() as Map<String, dynamic>;
-                    String carro = '${d['marca'] ?? ''} ${d['modelo'] ?? ''}'.trim();
-                    return [d['placa']?.toString() ?? '', carro, d['empresa']?.toString() ?? ''];
+                    return [d['nomeCompleto']?.toString() ?? '', d['empresa']?.toString() ?? '', d['contato']?.toString() ?? ''];
                   }),
                 ],
               )
@@ -273,22 +271,22 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
       ),
     );
 
-    await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save(), name: 'relatorio_veiculos.pdf');
+    await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save(), name: 'relatorio_integrantes.pdf');
   }
 
   Future<void> _exportarCSV(List<QueryDocumentSnapshot> docs) async {
     final dataHora = _formatarDataHora();
     List<List<dynamic>> rows = [];
 
-    for (String tipo in _tiposVeiculo) {
-      final grupoDocs = docs.where((d) => (d.data() as Map<String, dynamic>)['tipo'] == tipo).toList();
+    for (String funcao in _funcoes) {
+      final grupoDocs = docs.where((d) => (d.data() as Map<String, dynamic>)['funcao'] == funcao).toList();
       if (grupoDocs.isEmpty) continue;
       
-      rows.add(['--- TIPO: ${tipo.toUpperCase()} ---']);
-      rows.add(['Placa', 'Marca', 'Modelo', 'Empresa']); 
+      rows.add(['--- FUNÇÃO: $funcao ---']);
+      rows.add(['Nome', 'Empresa', 'Contato']); 
       for (var doc in grupoDocs) {
         var d = doc.data() as Map<String, dynamic>;
-        rows.add([d['placa'], d['marca'], d['modelo'], d['empresa']]);
+        rows.add([d['nomeCompleto'], d['empresa'], d['contato']]);
       }
       rows.add([]); 
     }
@@ -299,39 +297,37 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
 
     String csv = const ListToCsvConverter().convert(rows);
     final bytes = Uint8List.fromList(utf8.encode(csv));
-    final xFile = XFile.fromData(bytes, name: 'relatorio_veiculos.csv', mimeType: 'text/csv');
+    final xFile = XFile.fromData(bytes, name: 'relatorio_integrantes.csv', mimeType: 'text/csv');
     
-    await Share.shareXFiles([xFile], text: 'Segue o relatório de veículos do SOS_CTTU.');
+    await Share.shareXFiles([xFile], text: 'Segue o relatório de integrantes do SOS_CTTU.');
   }
 
-  // Mostra veículos ao clicar nos cards do Dashboard
-  void _mostrarVeiculosDoTipo(String tipo, List<QueryDocumentSnapshot> todosDocs) {
+  void _mostrarIntegrantesDaFuncao(String funcao, List<QueryDocumentSnapshot> todosDocs) {
     final filtrados = todosDocs.where((doc) {
       var d = doc.data() as Map<String, dynamic>;
-      return d['tipo'] == tipo;
+      return d['funcao'] == funcao;
     }).toList();
 
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('Veículos - $tipo'),
+          title: Text('Integrantes - $funcao'),
           content: SizedBox(
             width: double.maxFinite,
             height: 400,
             child: filtrados.isEmpty 
-              ? const Center(child: Text('Nenhum veículo encontrado.'))
+              ? const Center(child: Text('Nenhum integrante encontrado.'))
               : ListView.builder(
                   shrinkWrap: true,
                   itemCount: filtrados.length,
                   itemBuilder: (context, index) {
                     var d = filtrados[index].data() as Map<String, dynamic>;
-                    String carro = '${d['marca'] ?? ''} ${d['modelo'] ?? ''}'.trim();
                     return ListTile(
                       dense: true,
-                      leading: const Icon(Icons.local_shipping),
-                      title: Text(d['placa'] ?? ''),
-                      subtitle: Text(carro.isEmpty ? 'Sem detalhes' : carro),
+                      leading: const Icon(Icons.person),
+                      title: Text(d['nomeCompleto'] ?? ''),
+                      subtitle: Text(d['empresa'] ?? ''),
                     );
                   },
                 ),
@@ -344,14 +340,17 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
     );
   }
 
-  Color _corParaTipo(String tipo) {
-    switch (tipo) {
-      case 'Moto': return Colors.redAccent;
-      case 'Carro Passeio': return Colors.blue;
-      case 'Carro com Cesto': return Colors.orange;
-      case 'Pick-up': return Colors.teal;
-      case 'Caminhão Munck': return Colors.deepPurple;
-      default: return Colors.blueGrey;
+  Color _corParaFuncao(String funcao) {
+    switch (funcao) {
+      case 'VISTORIADOR': return Colors.teal;
+      case 'AUXILIAR DE ELETRICISTA': return Colors.lime.shade700;
+      case 'ELETRICISTA': return Colors.orange;
+      case 'MOTORISTA DE CAMINHÃO': return Colors.brown;
+      case 'OPERADOR DA CENTRAL': return Colors.blue;
+      case 'SUPERVISÃO DA CENTRAL': return Colors.indigo;
+      case 'SUPERVISÃO TÉCNICA': return Colors.purple;
+      case 'COORDENAÇÃO TÉCNICA': return Colors.red;
+      default: return Colors.grey;
     }
   }
 
@@ -360,7 +359,7 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('Gestão de Veículos', style: TextStyle(color: Colors.white)),
+        title: const Text('Gestão de Integrantes', style: TextStyle(color: Colors.white)),
         backgroundColor: Colors.black.withValues(alpha: 0.8),
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
@@ -379,8 +378,8 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
       floatingActionButton: _tabController.index == 0 
         ? FloatingActionButton.extended(
             backgroundColor: const Color(0xFF262C38),
-            icon: const Icon(Icons.add_circle, color: Colors.white),
-            label: const Text('Novo Veículo', style: TextStyle(color: Colors.white)),
+            icon: const Icon(Icons.person_add_alt_1, color: Colors.white),
+            label: const Text('Novo Integrante', style: TextStyle(color: Colors.white)),
             onPressed: () => _abrirModalFormulario(),
           )
         : null,
@@ -395,7 +394,7 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
           ),
           
           StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('veiculos').orderBy('placa').snapshots(),
+            stream: FirebaseFirestore.instance.collection('integrantes').orderBy('nomeCompleto').snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: Colors.white));
               if (snapshot.hasError) return const Center(child: Text('Erro ao carregar dados.', style: TextStyle(color: Colors.white)));
@@ -418,7 +417,7 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
                         child: TextField(
                           controller: _buscaController,
                           decoration: InputDecoration(
-                            hintText: 'Buscar pela placa ou marca...',
+                            hintText: 'Buscar integrante pelo nome...',
                             prefixIcon: const Icon(Icons.search),
                             fillColor: Colors.white.withValues(alpha: 0.95),
                             filled: true,
@@ -436,7 +435,7 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
                           child: ConstrainedBox(
                             constraints: const BoxConstraints(maxWidth: 800),
                             child: todosOsDocs.isEmpty 
-                              ? const Center(child: Text('Nenhum veículo cadastrado.', style: TextStyle(color: Colors.white, fontSize: 18)))
+                              ? const Center(child: Text('Nenhum integrante cadastrado.', style: TextStyle(color: Colors.white, fontSize: 18)))
                               : ListView.builder(
                                   padding: const EdgeInsets.only(bottom: 80, left: 16, right: 16),
                                   itemCount: todosOsDocs.length,
@@ -444,13 +443,9 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
                                     var doc = todosOsDocs[index];
                                     var data = doc.data() as Map<String, dynamic>;
 
-                                    String placa = data['placa'] ?? '';
-                                    String marcaModelo = '${data['marca'] ?? ''} ${data['modelo'] ?? ''}'.trim();
-                                    
-                                    // Busca tanto pela placa quanto pela marca/modelo
-                                    if (_termoBusca.isNotEmpty && 
-                                        !placa.toLowerCase().contains(_termoBusca) &&
-                                        !marcaModelo.toLowerCase().contains(_termoBusca)) {
+                                    String nome = data['nomeCompleto'] ?? 'Sem Nome';
+
+                                    if (_termoBusca.isNotEmpty && !nome.toLowerCase().contains(_termoBusca)) {
                                       return const SizedBox.shrink(); 
                                     }
 
@@ -459,19 +454,22 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
                                       color: Colors.white.withValues(alpha: 0.95),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                       child: ListTile(
-                                        dense: true,
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                        dense: true, // CARDS MENORES
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                                         leading: CircleAvatar(
                                           radius: 20,
-                                          backgroundColor: _corParaTipo(data['tipo'] ?? ''),
-                                          child: const Icon(Icons.local_shipping, color: Colors.white, size: 20),
+                                          backgroundColor: _corParaFuncao(data['funcao'] ?? ''), 
+                                          child: Text(
+                                            nome.isNotEmpty ? nome[0].toUpperCase() : 'I',
+                                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                          ),
                                         ),
-                                        title: Text(placa, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                        title: Text(nome, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                                         subtitle: Column(
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
-                                            Text(marcaModelo.isEmpty ? (data['tipo'] ?? 'Veículo') : marcaModelo, style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
-                                            Text('Tipo: ${data['tipo'] ?? ''}', style: const TextStyle(color: Colors.blueGrey, fontSize: 12)),
+                                            if (data['funcao'] != null && data['funcao'].toString().isNotEmpty) 
+                                              Text('Função: ${data['funcao']}', style: const TextStyle(color: Colors.blueGrey, fontWeight: FontWeight.bold, fontSize: 12)),
                                             if (data['empresa'] != null && data['empresa'].toString().isNotEmpty) 
                                               Text('Empresa: ${data['empresa']}', style: const TextStyle(fontSize: 12)),
                                           ],
@@ -480,7 +478,7 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
                                             IconButton(icon: const Icon(Icons.edit, color: Colors.blue, size: 20), onPressed: () => _abrirModalFormulario(docId: doc.id, dadosAtuais: data)),
-                                            IconButton(icon: const Icon(Icons.delete, color: Colors.red, size: 20), onPressed: () => _deletarVeiculo(doc.id, placa)),
+                                            IconButton(icon: const Icon(Icons.delete, color: Colors.red, size: 20), onPressed: () => _deletarIntegrante(doc.id, nome)),
                                           ],
                                         ),
                                       ),
@@ -506,6 +504,7 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
+                                // Grid dinâmico que lê todas as funções
                                 GridView.builder(
                                   shrinkWrap: true,
                                   physics: const NeverScrollableScrollPhysics(), 
@@ -515,13 +514,13 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
                                     crossAxisSpacing: 12,
                                     childAspectRatio: 1.0, 
                                   ),
-                                  itemCount: _tiposVeiculo.length,
+                                  itemCount: _funcoes.length,
                                   itemBuilder: (context, index) {
-                                    String tipo = _tiposVeiculo[index];
-                                    int count = todosOsDocs.where((d) => (d.data() as Map<String, dynamic>)['tipo'] == tipo).length;
-                                    Color cor = _corParaTipo(tipo);
+                                    String funcao = _funcoes[index];
+                                    int count = todosOsDocs.where((d) => (d.data() as Map<String, dynamic>)['funcao'] == funcao).length;
+                                    Color cor = _corParaFuncao(funcao);
                                     
-                                    return _buildDashboardCard(tipo, count, cor, () => _mostrarVeiculosDoTipo(tipo, todosOsDocs));
+                                    return _buildDashboardCard(funcao, count, cor, () => _mostrarIntegrantesDaFuncao(funcao, todosOsDocs));
                                   },
                                 ),
                                 const SizedBox(height: 48),
@@ -595,7 +594,7 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
               const SizedBox(height: 8),
               Text(
                 titulo, 
-                style: const TextStyle(fontSize: 13, color: Colors.blueGrey, fontWeight: FontWeight.bold), 
+                style: const TextStyle(fontSize: 12, color: Colors.blueGrey, fontWeight: FontWeight.bold), 
                 textAlign: TextAlign.center,
                 maxLines: 2, 
               ),

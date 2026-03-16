@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:sos_cttu/principal/tela_busca.dart';
+import 'package:sos_cttu/principal/tela_equipe.dart';
 
-// 1. Importação da tela de cadastros
+// Importação das telas filhas
 import 'cadastros/tela_cadastro.dart'; 
+import 'busca/tela_busca.dart'; // <--- Importação com o NOME CORRETO agora!
+import 'cadastros/tela_equipes.dart';
 
-// 2. IMPORTAÇÃO DO NOVO MENU REUTILIZÁVEL (ajuste o caminho se necessário)
+// Importação do MENU REUTILIZÁVEL
 import '../widgets/menu_usuario.dart'; 
 
 class TelaPrincipal extends StatelessWidget {
@@ -12,23 +16,21 @@ class TelaPrincipal extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true, // Faz a imagem passar por trás da AppBar
+      extendBodyBehindAppBar: true, 
       appBar: AppBar(
         title: const Text(
           'Sistema de Ocorrências Semafóricas',
           style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
         ),
-        backgroundColor: Colors.black.withValues(alpha: 0.6), // Barra superior semi-transparente
+        backgroundColor: Colors.black.withValues(alpha: 0.6), 
         elevation: 0,
         actions: const [
-          // 3. A MÁGICA ACONTECE AQUI! Substituímos todo o código do canto superior direito por isso:
           MenuUsuario(),
         ],
       ),
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // 4. Imagem de Fundo padronizada igual às outras telas (ótima para a Web)
           Image.asset(
             'assets/images/tela.png',
             fit: BoxFit.cover,
@@ -36,47 +38,57 @@ class TelaPrincipal extends StatelessWidget {
             colorBlendMode: BlendMode.darken,
           ),
           
-          // Os Botões Centrais Responsivos
           Center(
             child: SingleChildScrollView(
               padding: const EdgeInsets.only(top: 100.0, left: 24.0, right: 24.0, bottom: 24.0),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 900), // Limita largura em telas grandes
+                constraints: const BoxConstraints(maxWidth: 900), 
                 child: Wrap(
-                  spacing: 24.0, // Espaço horizontal entre os cartões
-                  runSpacing: 24.0, // Espaço vertical entre as linhas
+                  spacing: 24.0, 
+                  runSpacing: 24.0, 
                   alignment: WrapAlignment.center,
                   children: [
-                    _buildCard(context, 'Dashboard', Icons.dashboard, () {
+                    _buildCardWithIcon(context, 'Dashboard', Icons.dashboard, () {
                       print('Ir para Dashboard');
                     }),
-                    _buildCard(context, 'Lista de\nOcorrências', Icons.list_alt, () {
+                    _buildCardWithIcon(context, 'Lista de\nOcorrências', Icons.list_alt, () {
                       print('Ir para Lista de Ocorrências');
                     }),
-                    _buildCard(context, 'Mapa de\nOcorrências', Icons.map, () {
+                    _buildCardWithIcon(context, 'Mapa de\nOcorrências', Icons.map, () {
                       print('Ir para Mapa de Ocorrências');
                     }),
-                    _buildCard(context, 'Relatórios', Icons.pie_chart, () {
+                    _buildCardWithIcon(context, 'Relatórios', Icons.pie_chart, () {
                       print('Ir para Relatórios');
                     }),
-                    _buildCard(context, 'Gerenciar Equipes', Icons.engineering, () {
-                      print('Ir para Gerenciar Equipes');
+                    // BOTÃO GERENCIAR EQUIPES ATUALIZADO
+                    _buildCardWithImage(context, 'Gerenciar Equipes', 'assets/images/equipe.png', () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const TelaEquipes()),
+                      );
                     }),
-                    _buildCard(context, 'Cadastros', Icons.app_registration, () {
-                      // Navegação real para a tela de cadastros
+
+                    // BOTÃO DE CADASTROS (COM A IMAGEM PERSONALIZADA)
+                    _buildCardWithImage(context, 'Cadastros', 'assets/images/cadastros.png', () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(builder: (context) => const TelaCadastros()),
                       );
                     }),
-                    _buildCard(context, 'Estoque', Icons.inventory_2, () {
+
+                    _buildCardWithIcon(context, 'Estoque', Icons.inventory_2, () {
                       print('Ir para Estoque');
                     }),
-                    _buildCard(context, 'Programação', Icons.calendar_month, () {
+                    _buildCardWithIcon(context, 'Programação', Icons.calendar_month, () {
                       print('Ir para Programação');
                     }),
-                    _buildCard(context, 'Busca Semafórica', Icons.location_on, () {
-                      print('Ir para Busca Semafórica');
+
+                    // BOTÃO DE CADASTROS (COM A IMAGEM PERSONALIZADA)
+                    _buildCardWithImage(context, 'Busca Semafórica', 'assets/images/localizacao.png', () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const TelaBusca()),
+                      );
                     }),
                   ],
                 ),
@@ -88,8 +100,9 @@ class TelaPrincipal extends StatelessWidget {
     );
   }
 
-  // Widget personalizado para criar os botões brancos padronizados
-  Widget _buildCard(BuildContext context, String titulo, IconData icone, VoidCallback onTap) {
+  // --- MÉTODOS AUXILIARES PADRONIZADOS ---
+
+  Widget _buildBaseCard(BuildContext context, String titulo, Widget conteudoGrafico, VoidCallback onTap) {
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -105,15 +118,18 @@ class TelaPrincipal extends StatelessWidget {
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.2),
                 blurRadius: 10,
-                offset: const Offset(0, 5), // Sombra levemente deslocada para baixo
+                offset: const Offset(0, 5), 
               ),
             ],
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icone, size: 50, color: const Color(0xFF333A4A)),
-              const SizedBox(height: 16),
+              SizedBox(
+                height: 60, 
+                child: Center(child: conteudoGrafico),
+              ),
+              const SizedBox(height: 10), 
               Text(
                 titulo,
                 style: const TextStyle(
@@ -127,6 +143,28 @@ class TelaPrincipal extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildCardWithIcon(BuildContext context, String titulo, IconData icone, VoidCallback onTap) {
+    return _buildBaseCard(
+      context, 
+      titulo, 
+      Icon(icone, size: 50, color: const Color(0xFF333A4A)), 
+      onTap
+    );
+  }
+
+  Widget _buildCardWithImage(BuildContext context, String titulo, String caminhoImagem, VoidCallback onTap) {
+    return _buildBaseCard(
+      context, 
+      titulo, 
+      Image.asset(
+        caminhoImagem, 
+        height: 50, 
+        fit: BoxFit.contain,
+      ), 
+      onTap
     );
   }
 }

@@ -1,0 +1,402 @@
+[
+  {
+    "MATERIAL": "ABRAÇADEIRA 4\" PARA SUSTENTAÇÃO DE CONTROLADORES E CAIXAS BOTOEIRA",
+    "CODIGO": 1
+  },
+  {
+    "MATERIAL": "ABRAÇADEIRA 90MM, SUPORTE PARA BALANÇO CILÍNDRICO DE 3\"",
+    "CODIGO": 2
+  },
+  {
+    "MATERIAL": "ABRAÇADEIRA DE 114MM, SUPORTE PARA COLUNA CILÍNDRICA DE 4\"",
+    "CODIGO": 3
+  },
+  {
+    "MATERIAL": "ABRAÇADEIRA DE 143MM, SUPORTE PARA COLUNA CÔNICA",
+    "CODIGO": 4
+  },
+  {
+    "MATERIAL": "ABRAÇADEIRA DE 75MM, SUPORTE PARA BRAÇO CÔNICO",
+    "CODIGO": 5
+  },
+  {
+    "MATERIAL": "ADAPTADOR PARA ABRAÇADEIRA, SUPORTE BASCULANTE.",
+    "CODIGO": 6
+  },
+  {
+    "MATERIAL": "ANTENA GPRS",
+    "CODIGO": 7
+  },
+  {
+    "MATERIAL": "ANTENA GPS",
+    "CODIGO": 8
+  },
+  {
+    "MATERIAL": "ANTEPARO PARA GRUPO FOCAL TIPO I A LED",
+    "CODIGO": 9
+  },
+  {
+    "MATERIAL": "BASTIDOR (DIGICON - CD200)",
+    "CODIGO": 10
+  },
+  {
+    "MATERIAL": "BASTIDOR 06 FASES (GIT-SM)",
+    "CODIGO": 11
+  },
+  {
+    "MATERIAL": "BASTIDOR 10 FASES (GIT-CSMP)",
+    "CODIGO": 12
+  },
+  {
+    "MATERIAL": "BASTIDOR 10 FASES (GIT-SM)",
+    "CODIGO": 13
+  },
+  {
+    "MATERIAL": "BASTIDOR 16 FASES (GIT-CSMP)",
+    "CODIGO": 14
+  },
+  {
+    "MATERIAL": "BOTÃO DE COMANDO PARA BOTOEIRA SIMPLES",
+    "CODIGO": 15
+  },
+  {
+    "MATERIAL": "BRAÇO CÔNICO COM 5M DE PROJEÇÃO",
+    "CODIGO": 16
+  },
+  {
+    "MATERIAL": "BRAÇO SIMPLES EM AÇO GALVANIZADO 3\"",
+    "CODIGO": 17
+  },
+  {
+    "MATERIAL": "CABO FLAT 20 LINHAS",
+    "CODIGO": 18
+  },
+  {
+    "MATERIAL": "CABO FLAT SEQUENCIAL PARA O VERDE",
+    "CODIGO": 19
+  },
+  {
+    "MATERIAL": "CABO FLAT SEQUENCIAL PARA O VERMELHO",
+    "CODIGO": 20
+  },
+  {
+    "MATERIAL": "CABO FLEXÍVEL 4MM VERDE PARA ATERRAMENTO",
+    "CODIGO": 21
+  },
+  {
+    "MATERIAL": "CABO PP 2X1MM",
+    "CODIGO": 22
+  },
+  {
+    "MATERIAL": "CABO PP 3X1MM",
+    "CODIGO": 23
+  },
+  {
+    "MATERIAL": "CABO PP 4X1MM",
+    "CODIGO": 24
+  },
+  {
+    "MATERIAL": "CABO PP 7X1MM",
+    "CODIGO": 25
+  },
+  {
+    "MATERIAL": "CAIXA DE BOTOEIRA COM DISPOSITIVO SONORO",
+    "CODIGO": 26
+  },
+  {
+    "MATERIAL": "CAIXA DE BOTOEIRA SIMPLES",
+    "CODIGO": 27
+  },
+  {
+    "MATERIAL": "COBRE FOCO RETANGULAR",
+    "CODIGO": 28
+  },
+  {
+    "MATERIAL": "COLUNA CILÍNDRICA 4''",
+    "CODIGO": 29
+  },
+  {
+    "MATERIAL": "COLUNA CÔNICA 6M",
+    "CODIGO": 30
+  },
+  {
+    "MATERIAL": "DISJUNTOR 10 AMP",
+    "CODIGO": 31
+  },
+  {
+    "MATERIAL": "DISJUNTOR 16 AMP",
+    "CODIGO": 32
+  },
+  {
+    "MATERIAL": "FUSÍVEL - 05 AMP",
+    "CODIGO": 33
+  },
+  {
+    "MATERIAL": "FUSÍVEL - 10 AMP",
+    "CODIGO": 34
+  },
+  {
+    "MATERIAL": "FUSÍVEL - 15 AMP",
+    "CODIGO": 35
+  },
+  {
+    "MATERIAL": "GABINETE (DIGICON - CD200)",
+    "CODIGO": 36
+  },
+  {
+    "MATERIAL": "GABINETE (DIGICON - CD300)",
+    "CODIGO": 37
+  },
+  {
+    "MATERIAL": "GABINETE (DIGICON - FCA)",
+    "CODIGO": 38
+  },
+  {
+    "MATERIAL": "GABINETE PARA CONTROLADOR (GIT-CSMP)",
+    "CODIGO": 39
+  },
+  {
+    "MATERIAL": "GABINETE PARA CONTROLADOR (GIT-SM)",
+    "CODIGO": 40
+  },
+  {
+    "MATERIAL": "GRUPO FOCAL COM CRONÔMETRO REGRESSIVO",
+    "CODIGO": 41
+  },
+  {
+    "MATERIAL": "GRUPO FOCAL COM SEQUENCIAL GRADATIVO",
+    "CODIGO": 42
+  },
+  {
+    "MATERIAL": "GRUPO FOCAL RETANGULAR 2 FOCOS",
+    "CODIGO": 43
+  },
+  {
+    "MATERIAL": "GRUPO FOCAL TIPO \"I\" 200MM",
+    "CODIGO": 44
+  },
+  {
+    "MATERIAL": "HASTE DE COBRE PARA ATERRAMENTO",
+    "CODIGO": 45
+  },
+  {
+    "MATERIAL": "ISOLADOR DE PORCELANA.",
+    "CODIGO": 46
+  },
+  {
+    "MATERIAL": "KIT CELPE - MATERIAL P/ LIGAÇÃO DE SEMÁFOROS NA REDE DE BAIXA TENSÃO E IMPLANTAÇÃO DE RELÓGIO MEDIDOR",
+    "CODIGO": 47
+  },
+  {
+    "MATERIAL": "KIT COMUNICAÇÃO",
+    "CODIGO": 48
+  },
+  {
+    "MATERIAL": "LED AMARELO 200MM",
+    "CODIGO": 49
+  },
+  {
+    "MATERIAL": "LED CRÔNOMETRO PEDESTRE",
+    "CODIGO": 50
+  },
+  {
+    "MATERIAL": "LED VERDE 200MM",
+    "CODIGO": 51
+  },
+  {
+    "MATERIAL": "LED VERDE CICLISTA REDONDO",
+    "CODIGO": 52
+  },
+  {
+    "MATERIAL": "LED VERDE PEDESTRE",
+    "CODIGO": 53
+  },
+  {
+    "MATERIAL": "LED VERMELHO 200MM",
+    "CODIGO": 54
+  },
+  {
+    "MATERIAL": "LED VERMELHO CICISTA REDONDO",
+    "CODIGO": 55
+  },
+  {
+    "MATERIAL": "LED VERMELHO PEDESTRE",
+    "CODIGO": 56
+  },
+  {
+    "MATERIAL": "LENTE PRISMÁTICA AMARELA 200MM",
+    "CODIGO": 57
+  },
+  {
+    "MATERIAL": "LENTE PRISMÁTICA VERDE 200MM",
+    "CODIGO": 58
+  },
+  {
+    "MATERIAL": "LENTE PRISMÁTICA VERMELHA 200MM",
+    "CODIGO": 59
+  },
+  {
+    "MATERIAL": "LENTE TRANSPARENTE 200MM",
+    "CODIGO": 60
+  },
+  {
+    "MATERIAL": "LENTE TRANSPARENTE RETANGULAR",
+    "CODIGO": 61
+  },
+  {
+    "MATERIAL": "MÁSCARA DE SETA 200MM",
+    "CODIGO": 62
+  },
+  {
+    "MATERIAL": "MODULO 4G/GPRS (DIGICON - CD200)",
+    "CODIGO": 63
+  },
+  {
+    "MATERIAL": "MODULO 4G/GPRS (DIGICON - CD300)",
+    "CODIGO": 64
+  },
+  {
+    "MATERIAL": "MODULO 4G/GPRS (DIGICON - FCA)",
+    "CODIGO": 65
+  },
+  {
+    "MATERIAL": "MODULO BOTOEIRA (DIGICON - CD200)",
+    "CODIGO": 66
+  },
+  {
+    "MATERIAL": "MODULO BOTOEIRA (DIGICON - CD300)",
+    "CODIGO": 67
+  },
+  {
+    "MATERIAL": "MODULO COMUNICAÇÃO (DIGICON - CD200)",
+    "CODIGO": 68
+  },
+  {
+    "MATERIAL": "MODULO COMUNICAÇÃO (DIGICON - CD300)",
+    "CODIGO": 69
+  },
+  {
+    "MATERIAL": "MODULO COMUNICAÇÃO SOTU MCS (DIGICON - CD200)",
+    "CODIGO": 70
+  },
+  {
+    "MATERIAL": "MODULO COMUNICAÇÃO SOTU MCS (DIGICON - CD300)",
+    "CODIGO": 71
+  },
+  {
+    "MATERIAL": "MODULO DET. MV8 (DIGICON - CD200)",
+    "CODIGO": 72
+  },
+  {
+    "MATERIAL": "MODULO DET. MV8 (DIGICON - CD300)",
+    "CODIGO": 73
+  },
+  {
+    "MATERIAL": "MODULO ELETRICO (DIGICON - FCA)",
+    "CODIGO": 74
+  },
+  {
+    "MATERIAL": "MODULO ELETRICO 16 FASES (DIGICON - CD200)",
+    "CODIGO": 75
+  },
+  {
+    "MATERIAL": "MODULO ELETRICO 16 FASES (DIGICON - CD300)",
+    "CODIGO": 76
+  },
+  {
+    "MATERIAL": "MODULO ELETRICO 8 FASES (DIGICON - CD200)",
+    "CODIGO": 77
+  },
+  {
+    "MATERIAL": "MODULO ELETRICO 8 FASES (DIGICON - CD300)",
+    "CODIGO": 78
+  },
+  {
+    "MATERIAL": "MODULO LOGICO (DIGICON - CD200)",
+    "CODIGO": 79
+  },
+  {
+    "MATERIAL": "MODULO LOGICO (DIGICON - CD300)",
+    "CODIGO": 80
+  },
+  {
+    "MATERIAL": "MODULO POTENCIA (DIGICON - CD200)",
+    "CODIGO": 81
+  },
+  {
+    "MATERIAL": "MODULO POTENCIA (DIGICON - CD300)",
+    "CODIGO": 82
+  },
+  {
+    "MATERIAL": "MODULO POTENCIA (DIGICON - FCA)",
+    "CODIGO": 83
+  },
+  {
+    "MATERIAL": "NOBREAK",
+    "CODIGO": 84
+  },
+  {
+    "MATERIAL": "PLACA AMEG (GIT-CSMP)",
+    "CODIGO": 85
+  },
+  {
+    "MATERIAL": "PLACA BEAGLEBONE (GIT-CSMP)",
+    "CODIGO": 86
+  },
+  {
+    "MATERIAL": "PLACA DE ATUADORES (GIT-CSMP)",
+    "CODIGO": 87
+  },
+  {
+    "MATERIAL": "PLACA DE ATUADORES (GIT-SM)",
+    "CODIGO": 88
+  },
+  {
+    "MATERIAL": "PLACA DE FASE (GIT-CSMP)",
+    "CODIGO": 89
+  },
+  {
+    "MATERIAL": "PLACA DE FASE (GIT-SM)",
+    "CODIGO": 90
+  },
+  {
+    "MATERIAL": "PLACA DE FONTE (GIT-CSMP)",
+    "CODIGO": 91
+  },
+  {
+    "MATERIAL": "PLACA DE FONTE (GIT-SM)",
+    "CODIGO": 92
+  },
+  {
+    "MATERIAL": "PLACA DE SEQUENCIAL GRADATIVO",
+    "CODIGO": 93
+  },
+  {
+    "MATERIAL": "PLACA DE VERDE CONFLITO (GIT-CSMP)",
+    "CODIGO": 94
+  },
+  {
+    "MATERIAL": "PLACA DE VERDE CONFLITO (GIT-SM)",
+    "CODIGO": 95
+  },
+  {
+    "MATERIAL": "PLACA DE WATCHDOG (GIT-CSMP)",
+    "CODIGO": 96
+  },
+  {
+    "MATERIAL": "PLACA DE WATCHDOG (GIT-SM)",
+    "CODIGO": 97
+  },
+  {
+    "MATERIAL": "PLACA NUMÉRICA DE IDENTIFICAÇÃO",
+    "CODIGO": 98
+  },
+  {
+    "MATERIAL": "SETA DE SEQUÊNCIAL VERDE",
+    "CODIGO": 99
+  },
+  {
+    "MATERIAL": "SETA DE SEQUÊNCIAL VERMELHO",
+    "CODIGO": 100
+  }
+]
