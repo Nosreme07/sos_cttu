@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:sos_cttu/principal/tela_busca.dart';
-import 'package:sos_cttu/principal/tela_equipe.dart';
+import 'package:sos_cttu/principal/equipes/tela_equipes.dart';
+import 'package:sos_cttu/principal/mapa/tela_mapa_ocorrencias.dart';
 
-// Importação das telas filhas
-import 'cadastros/tela_cadastro.dart'; 
-import 'busca/tela_busca.dart'; // <--- Importação com o NOME CORRETO agora!
+// Importações das telas do sistema
+import 'busca/tela_busca.dart';
 import 'cadastros/tela_equipes.dart';
+import 'programacao/tela_programacao.dart';
+import 'cadastros/tela_cadastro.dart';
+import 'ocorrencias/tela_ocorrencias.dart';
+import 'ocorrencias/tela_mapa_ocorrencias.dart';
+import 'dashboard/tela_dashboard.dart';
+import 'relatorios/tela_relatorios.dart';
 
 // Importação do MENU REUTILIZÁVEL
-import '../widgets/menu_usuario.dart'; 
+import '../widgets/menu_usuario.dart';
 
 class TelaPrincipal extends StatelessWidget {
   const TelaPrincipal({super.key});
@@ -16,17 +21,15 @@ class TelaPrincipal extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true, 
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: const Text(
           'Sistema de Ocorrências Semafóricas',
           style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
         ),
-        backgroundColor: Colors.black.withValues(alpha: 0.6), 
+        backgroundColor: Colors.black.withValues(alpha: 0.6),
         elevation: 0,
-        actions: const [
-          MenuUsuario(),
-        ],
+        actions: const [MenuUsuario()],
       ),
       body: Stack(
         fit: StackFit.expand,
@@ -37,59 +40,142 @@ class TelaPrincipal extends StatelessWidget {
             color: Colors.black.withValues(alpha: 0.4),
             colorBlendMode: BlendMode.darken,
           ),
-          
+
           Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.only(top: 100.0, left: 24.0, right: 24.0, bottom: 24.0),
+              padding: const EdgeInsets.only(
+                top: 100.0,
+                left: 24.0,
+                right: 24.0,
+                bottom: 24.0,
+              ),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 900), 
+                constraints: const BoxConstraints(maxWidth: 900),
                 child: Wrap(
-                  spacing: 24.0, 
-                  runSpacing: 24.0, 
+                  spacing: 24.0,
+                  runSpacing: 24.0,
                   alignment: WrapAlignment.center,
                   children: [
-                    _buildCardWithIcon(context, 'Dashboard', Icons.dashboard, () {
-                      print('Ir para Dashboard');
-                    }),
-                    _buildCardWithIcon(context, 'Lista de\nOcorrências', Icons.list_alt, () {
-                      print('Ir para Lista de Ocorrências');
-                    }),
-                    _buildCardWithIcon(context, 'Mapa de\nOcorrências', Icons.map, () {
-                      print('Ir para Mapa de Ocorrências');
-                    }),
-                    _buildCardWithIcon(context, 'Relatórios', Icons.pie_chart, () {
-                      print('Ir para Relatórios');
-                    }),
-                    // BOTÃO GERENCIAR EQUIPES ATUALIZADO
-                    _buildCardWithImage(context, 'Gerenciar Equipes', 'assets/images/equipe.png', () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const TelaEquipes()),
-                      );
-                    }),
+                    // BOTÃO DASHBOARD ATUALIZADO
+                    _buildCardWithImage(
+                      context,
+                      'Dashboard',
+                      'assets/images/Dashboard.png', // Certifique-se de que o nome da imagem está correto
+                      () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const TelaDashboard(),
+                          ),
+                        );
+                      },
+                    ),
 
-                    // BOTÃO DE CADASTROS (COM A IMAGEM PERSONALIZADA)
-                    _buildCardWithImage(context, 'Cadastros', 'assets/images/cadastros.png', () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const TelaCadastros()),
-                      );
-                    }),
+                    // --- BOTÃO LISTA DE OCORRÊNCIAS ATUALIZADO ---
+                    _buildCardWithImage(
+                      context,
+                      'Lista de\nOcorrências',
+                      'assets/images/ocorrencias.png', // Usando a imagem que você pediu
+                      () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) =>
+                                const ListaOcorrencias(), // Navegação ativada
+                          ),
+                        );
+                      },
+                    ),
 
-                    _buildCardWithIcon(context, 'Estoque', Icons.inventory_2, () {
-                      print('Ir para Estoque');
-                    }),
-                    _buildCardWithIcon(context, 'Programação', Icons.calendar_month, () {
-                      print('Ir para Programação');
-                    }),
+                    // BOTÃO MAPA DE OCORRÊNCIAS ATUALIZADO
+                    _buildCardWithImage(
+                      context,
+                      'Mapa de\nOcorrências',
+                      'assets/images/mapas.png',
+                      () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const TelaMapaOcorrencias(),
+                          ),
+                        );
+                      },
+                    ),
 
-                    // BOTÃO DE CADASTROS (COM A IMAGEM PERSONALIZADA)
-                    _buildCardWithImage(context, 'Busca Semafórica', 'assets/images/localizacao.png', () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const TelaBusca()),
-                      );
-                    }),
+                    // BOTÃO RELATÓRIOS ATUALIZADO
+                    _buildCardWithImage(
+                      context,
+                      'Relatórios',
+                      'assets/images/relatorios.png',
+                      () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const TelaRelatorios(),
+                          ),
+                        );
+                      },
+                    ),
+
+                    // BOTÃO GERENCIAR EQUIPES
+                    _buildCardWithImage(
+                      context,
+                      'Gerenciar Equipes',
+                      'assets/images/equipe.png',
+                      () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const TelaEquipes(),
+                          ),
+                        );
+                      },
+                    ),
+
+                    // BOTÃO DE CADASTROS
+                    _buildCardWithImage(
+                      context,
+                      'Cadastros',
+                      'assets/images/cadastros.png',
+                      () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const TelaCadastros(),
+                          ),
+                        );
+                      },
+                    ),
+
+                    // BOTÃO GERENCIAR PROGRAMAÇÃO
+                    _buildCardWithImage(
+                      context,
+                      'Programação',
+                      'assets/images/programacao.png',
+                      () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const TelaProgramacao(),
+                          ),
+                        );
+                      },
+                    ),
+
+                    // BOTÃO DE BUSCA SEMAFÓRICA
+                    _buildCardWithImage(
+                      context,
+                      'Busca Semafórica',
+                      'assets/images/localizacao.png',
+                      () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const TelaBusca(),
+                          ),
+                        );
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -102,7 +188,12 @@ class TelaPrincipal extends StatelessWidget {
 
   // --- MÉTODOS AUXILIARES PADRONIZADOS ---
 
-  Widget _buildBaseCard(BuildContext context, String titulo, Widget conteudoGrafico, VoidCallback onTap) {
+  Widget _buildBaseCard(
+    BuildContext context,
+    String titulo,
+    Widget conteudoGrafico,
+    VoidCallback onTap,
+  ) {
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -118,18 +209,15 @@ class TelaPrincipal extends StatelessWidget {
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.2),
                 blurRadius: 10,
-                offset: const Offset(0, 5), 
+                offset: const Offset(0, 5),
               ),
             ],
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              SizedBox(
-                height: 60, 
-                child: Center(child: conteudoGrafico),
-              ),
-              const SizedBox(height: 10), 
+              SizedBox(height: 60, child: Center(child: conteudoGrafico)),
+              const SizedBox(height: 10),
               Text(
                 titulo,
                 style: const TextStyle(
@@ -146,25 +234,35 @@ class TelaPrincipal extends StatelessWidget {
     );
   }
 
-  Widget _buildCardWithIcon(BuildContext context, String titulo, IconData icone, VoidCallback onTap) {
+  Widget _buildCardWithIcon(
+    BuildContext context,
+    String titulo,
+    IconData icone,
+    VoidCallback onTap,
+  ) {
     return _buildBaseCard(
-      context, 
-      titulo, 
-      Icon(icone, size: 50, color: const Color(0xFF333A4A)), 
-      onTap
+      context,
+      titulo,
+      Icon(icone, size: 50, color: const Color(0xFF333A4A)),
+      onTap,
     );
   }
 
-  Widget _buildCardWithImage(BuildContext context, String titulo, String caminhoImagem, VoidCallback onTap) {
+  Widget _buildCardWithImage(
+    BuildContext context,
+    String titulo,
+    String caminhoImagem,
+    VoidCallback onTap,
+  ) {
     return _buildBaseCard(
-      context, 
-      titulo, 
-      Image.asset(
-        caminhoImagem, 
-        height: 50, 
-        fit: BoxFit.contain,
-      ), 
-      onTap
+      context,
+      titulo,
+      Image.asset(caminhoImagem, height: 50, fit: BoxFit.contain),
+      onTap,
     );
   }
+}
+
+class TelaEquipe {
+  const TelaEquipe();
 }
