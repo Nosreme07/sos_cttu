@@ -4,7 +4,6 @@ import 'package:sos_cttu/principal/mapa/tela_mapa_ocorrencias.dart';
 
 // Importações das telas do sistema
 import 'busca/tela_busca.dart';
-import 'cadastros/tela_equipes.dart';
 import 'programacao/tela_programacao.dart';
 import 'cadastros/tela_cadastro.dart';
 import 'ocorrencias/tela_ocorrencias.dart';
@@ -60,7 +59,7 @@ class TelaPrincipal extends StatelessWidget {
                     _buildCardWithImage(
                       context,
                       'Dashboard',
-                      'assets/images/Dashboard.png', // Certifique-se de que o nome da imagem está correto
+                      'assets/images/dashboard.png', // Certifique-se de que o nome da imagem está correto
                       () {
                         Navigator.push(
                           context,
@@ -257,7 +256,7 @@ class TelaPrincipal extends StatelessWidget {
     return _buildBaseCard(
       context,
       titulo,
-      Image.asset(caminhoImagem, height: 50, fit: BoxFit.contain),
+      Image.asset(caminhoImagem, height: 85, fit: BoxFit.contain),
       onTap,
     );
   }

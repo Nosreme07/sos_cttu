@@ -893,7 +893,7 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
     List<String> items,
     Function(String?) onChanged,
   ) {
-    return Column(
+    var column = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
@@ -920,6 +920,7 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
         ),
       ],
     );
+    return column;
   }
 
   Widget _buildTextField(String label, TextEditingController controller) {

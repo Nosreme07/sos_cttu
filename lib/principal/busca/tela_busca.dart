@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:url_launcher/url_launcher.dart'; // PACOTE DE ROTAS E LINKS
+import 'package:url_launcher/url_launcher.dart';
 
 // Importações para Exportação
 import 'package:pdf/pdf.dart';
@@ -64,28 +64,13 @@ class _TelaBuscaState extends State<TelaBusca> {
       'titulo': 'Grupos Focais',
       'icone': Icons.traffic,
       'campos': [
-        {
-          'key': 'grupo_focal_veicular_tipo_i',
-          'label': 'GF Veicular Tipo I (Padrão)',
-        },
-        {
-          'key': 'grupo_focal_veicular_tipo_t',
-          'label': 'GF Veicular Tipo T (Seta)',
-        },
+        {'key': 'grupo_focal_veicular_tipo_i', 'label': 'GF Veicular Tipo I (Padrão)'},
+        {'key': 'grupo_focal_veicular_tipo_t', 'label': 'GF Veicular Tipo T (Seta)'},
         {'key': 'grupo_focal_pedestre_simples', 'label': 'GF Pedestre Simples'},
-        {
-          'key': 'grupo_focal_pedestre_com_cronometro',
-          'label': 'GF Pedestre com Cronômetro',
-        },
+        {'key': 'grupo_focal_pedestre_com_cronometro', 'label': 'GF Pedestre com Cronômetro'},
         {'key': 'grupo_focal_faixa_reversivel', 'label': 'GF Faixa Reversível'},
-        {
-          'key': 'grupo_focal_ciclista_com_tres_focos',
-          'label': 'GF Ciclista com Três Focos',
-        },
-        {
-          'key': 'grupo_focal_ciclista_com_dois_focos',
-          'label': 'GF Ciclista com Dois Focos',
-        },
+        {'key': 'grupo_focal_ciclista_com_tres_focos', 'label': 'GF Ciclista com Três Focos'},
+        {'key': 'grupo_focal_ciclista_com_dois_focos', 'label': 'GF Ciclista com Dois Focos'},
         {'key': 'anteparo_tipo_i', 'label': 'Anteparo Tipo I'},
       ],
     },
@@ -96,14 +81,8 @@ class _TelaBuscaState extends State<TelaBusca> {
         {'key': 'veicular_com_sequencial', 'label': 'Veicular com Sequencial'},
         {'key': 'veicular_com_cronometro', 'label': 'Veicular com Cronômetro'},
         {'key': 'sirene', 'label': 'Sirene'},
-        {
-          'key': 'horario_de_funcionamente_das_sirenes',
-          'label': 'Horário de Funcionamento da Sirene',
-        },
-        {
-          'key': 'botoeira_com_dispositivo_sonoro',
-          'label': 'Botoeira com Dispositivo Sonoro',
-        },
+        {'key': 'horario_de_funcionamente_das_sirenes', 'label': 'Horário de Funcionamento da Sirene'},
+        {'key': 'botoeira_com_dispositivo_sonoro', 'label': 'Botoeira com Dispositivo Sonoro'},
         {'key': 'botoeira_simples', 'label': 'Botoeira Simples'},
       ],
     },
@@ -116,10 +95,7 @@ class _TelaBuscaState extends State<TelaBusca> {
         {'key': 'numero_do_nobreak', 'label': 'Número do Nobreak'},
         {'key': 'medidor', 'label': 'Medidor (Existente)'},
         {'key': 'numero_do_medidor', 'label': 'Número do Medidor'},
-        {
-          'key': 'kit_de_comunicacao',
-          'label': 'Kit de Comunicação (Existente)',
-        },
+        {'key': 'kit_de_comunicacao', 'label': 'Kit de Comunicação (Existente)'},
         {'key': 'modo_de_funcionamento', 'label': 'Modo de Funcionamento'},
       ],
     },
@@ -134,18 +110,9 @@ class _TelaBuscaState extends State<TelaBusca> {
         {'key': 'portico_estruturado', 'label': 'Pórtico Estruturado'},
         {'key': 'coluna_conica', 'label': 'Coluna Cônica'},
         {'key': 'coluna_simples', 'label': 'Coluna Simples'},
-        {
-          'key': 'placa_adesiva_para_botoeira',
-          'label': 'Placa Adesiva para Botoeira',
-        },
-        {
-          'key': 'conjunto_entrada_de_energia_padrao_celpe_instalado',
-          'label': 'Entrada de Energia CELPE Instalado',
-        },
-        {
-          'key': 'conjunto_aterramento_para_colunas',
-          'label': 'Conjunto Aterramento para Colunas',
-        },
+        {'key': 'placa_adesiva_para_botoeira', 'label': 'Placa Adesiva para Botoeira'},
+        {'key': 'conjunto_entrada_de_energia_padrao_celpe_instalado', 'label': 'Entrada de Energia CELPE Instalado'},
+        {'key': 'conjunto_aterramento_para_colunas', 'label': 'Conjunto Aterramento para Colunas'},
       ],
     },
     {
@@ -157,10 +124,7 @@ class _TelaBuscaState extends State<TelaBusca> {
         {'key': 'cabo_4x1mm', 'label': 'Cabo 4x1mm'},
         {'key': 'cabo_7x1mm', 'label': 'Cabo 7x1mm'},
         {'key': 'luminarias', 'label': 'Luminárias'},
-        {
-          'key': 'placa_de_identificacao_de_semaforo',
-          'label': 'Placa de Identificação',
-        },
+        {'key': 'placa_de_identificacao_de_semaforo', 'label': 'Placa de Identificação'},
         {'key': 'fotossensor_equipamento', 'label': 'Fotossensor no Semáforo'},
         {'key': 'conta_contrato', 'label': 'Conta Contrato'},
         {'key': 'link_da_programacao', 'label': 'Link da Programação'},
@@ -305,9 +269,7 @@ class _TelaBuscaState extends State<TelaBusca> {
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text(
-                          'Este semáforo não possui coordenadas GPS.',
-                        ),
+                        content: Text('Este semáforo não possui coordenadas GPS.'),
                       ),
                     );
                   }
@@ -332,9 +294,7 @@ class _TelaBuscaState extends State<TelaBusca> {
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text(
-                        'Abertura de nova ocorrência será ativada no próximo módulo!',
-                      ),
+                      content: Text('Abertura de nova ocorrência será ativada no próximo módulo!'),
                     ),
                   );
                 },
@@ -379,8 +339,7 @@ class _TelaBuscaState extends State<TelaBusca> {
                         'Exportar PDF',
                         style: TextStyle(color: Colors.white, fontSize: 12),
                       ),
-                      onPressed: () =>
-                          _exportarPdfIndividual(data, idFormatado),
+                      onPressed: () => _exportarPdfIndividual(data, idFormatado),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -398,8 +357,7 @@ class _TelaBuscaState extends State<TelaBusca> {
                         'Exportar XLS',
                         style: TextStyle(color: Colors.white, fontSize: 12),
                       ),
-                      onPressed: () =>
-                          _exportarCsvIndividual(data, idFormatado),
+                      onPressed: () => _exportarCsvIndividual(data, idFormatado),
                     ),
                   ),
                 ],
@@ -488,8 +446,7 @@ class _TelaBuscaState extends State<TelaBusca> {
                             const Divider(thickness: 1),
                             const SizedBox(height: 8),
                             ...grupo['campos'].map((campo) {
-                              String valor = (data[campo['key']] ?? '')
-                                  .toString();
+                              String valor = (data[campo['key']] ?? '').toString();
                               if (valor.isEmpty) return const SizedBox.shrink();
 
                               return Padding(
@@ -581,10 +538,14 @@ class _TelaBuscaState extends State<TelaBusca> {
                   final url = Uri.parse(
                     'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng',
                   );
-                  if (!await launchUrl(
+                  bool launched = await launchUrl(
                     url,
                     mode: LaunchMode.externalApplication,
-                  )) {
+                  );
+                  
+                  if (!mounted) return; // Correção do Lint: Evitar usar o context antes de checar se está montado
+                  
+                  if (!launched) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Não foi possível abrir o Google Maps'),
@@ -609,10 +570,14 @@ class _TelaBuscaState extends State<TelaBusca> {
                   final url = Uri.parse(
                     'https://waze.com/ul?ll=$lat,$lng&navigate=yes',
                   );
-                  if (!await launchUrl(
+                  bool launched = await launchUrl(
                     url,
                     mode: LaunchMode.externalApplication,
-                  )) {
+                  );
+                  
+                  if (!mounted) return; // Correção do Lint: Evitar usar o context antes de checar se está montado
+                  
+                  if (!launched) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Não foi possível abrir o Waze'),
@@ -695,11 +660,12 @@ class _TelaBuscaState extends State<TelaBusca> {
             List<List<String>> tabelaGrupo = [];
             for (var campo in grupo['campos']) {
               String valor = (data[campo['key']] ?? '').toString();
-              if (valor.isNotEmpty)
+              if (valor.isNotEmpty) {
                 tabelaGrupo.add([
                   campo['label'].toString().replaceAll(' *', ''),
                   valor,
                 ]);
+              }
             }
 
             conteudo.add(
@@ -752,8 +718,9 @@ class _TelaBuscaState extends State<TelaBusca> {
       rows.add(['Campo', 'Informação']);
       for (var campo in grupo['campos']) {
         String valor = (data[campo['key']] ?? '').toString();
-        if (valor.isNotEmpty)
+        if (valor.isNotEmpty) {
           rows.add([campo['label'].toString().replaceAll(' *', ''), valor]);
+        }
       }
       rows.add([]);
     }
@@ -819,46 +786,42 @@ class _TelaBuscaState extends State<TelaBusca> {
           ),
 
           StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('semaforos')
-                .snapshots(),
+            stream: FirebaseFirestore.instance.collection('semaforos').snapshots(),
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting)
+              if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(
                   child: CircularProgressIndicator(color: Colors.white),
                 );
-              if (snapshot.hasError)
+              }
+              if (snapshot.hasError) {
                 return const Center(
                   child: Text(
                     'Erro ao carregar dados.',
                     style: TextStyle(color: Colors.white),
                   ),
                 );
+              }
 
               final docs = snapshot.data?.docs.toList() ?? [];
               docs.sort((a, b) {
-                int numA =
-                    int.tryParse(
+                int numA = int.tryParse(
                       ((a.data() as Map)['id'] ?? '').toString().replaceAll(
-                        RegExp(r'[^0-9]'),
-                        '',
-                      ),
+                            RegExp(r'[^0-9]'),
+                            '',
+                          ),
                     ) ??
                     0;
-                int numB =
-                    int.tryParse(
+                int numB = int.tryParse(
                       ((b.data() as Map)['id'] ?? '').toString().replaceAll(
-                        RegExp(r'[^0-9]'),
-                        '',
-                      ),
+                            RegExp(r'[^0-9]'),
+                            '',
+                          ),
                     ) ??
                     0;
                 return numA.compareTo(numB);
               });
 
-              List<QueryDocumentSnapshot> semaforosFiltrados = docs.where((
-                doc,
-              ) {
+              List<QueryDocumentSnapshot> semaforosFiltrados = docs.where((doc) {
                 if (_termoBusca.isEmpty) return true;
 
                 var data = doc.data() as Map<String, dynamic>;
@@ -870,8 +833,7 @@ class _TelaBuscaState extends State<TelaBusca> {
                 String empresa = data['empresa']?.toString() ?? '';
                 String rota = data['rota']?.toString() ?? '';
 
-                bool contemTexto(String texto) =>
-                    texto.toLowerCase().contains(_termoBusca);
+                bool contemTexto(String texto) => texto.toLowerCase().contains(_termoBusca);
 
                 switch (_filtroSelecionado) {
                   case 'Semáforo':
@@ -905,9 +867,7 @@ class _TelaBuscaState extends State<TelaBusca> {
 
                 if (coords != null) {
                   Widget iconeMarcador;
-                  String nomeEmpresa = (data['empresa'] ?? '')
-                      .toString()
-                      .toUpperCase();
+                  String nomeEmpresa = (data['empresa'] ?? '').toString().toUpperCase();
 
                   if (nomeEmpresa.contains('SERTTEL')) {
                     iconeMarcador = Image.asset(
@@ -935,9 +895,7 @@ class _TelaBuscaState extends State<TelaBusca> {
                       width: 45,
                       height: 45,
                       child: GestureDetector(
-                        onTap: () => _abrirDetalhesResumidos(
-                          data,
-                        ), // AQUI CHAMA O NOVO MODAL
+                        onTap: () => _abrirDetalhesResumidos(data),
                         child: iconeMarcador,
                       ),
                     ),
@@ -990,7 +948,7 @@ class _TelaBuscaState extends State<TelaBusca> {
                                     ),
                                     items: _opcoesFiltro
                                         .map(
-                                          (String f) => DropdownMenuItem(
+                                          (String f) => DropdownMenuItem<String>(
                                             value: f,
                                             child: Text(f),
                                           ),
@@ -999,8 +957,7 @@ class _TelaBuscaState extends State<TelaBusca> {
                                     onChanged: (novoValor) {
                                       setState(() {
                                         _filtroSelecionado = novoValor!;
-                                        _termoBusca = _buscaController.text
-                                            .toLowerCase();
+                                        _termoBusca = _buscaController.text.toLowerCase();
                                       });
                                     },
                                   ),
@@ -1023,8 +980,9 @@ class _TelaBuscaState extends State<TelaBusca> {
                                     ),
                                   ),
                                   onChanged: (valor) {
-                                    if (_debounce?.isActive ?? false)
+                                    if (_debounce?.isActive ?? false) {
                                       _debounce!.cancel();
+                                    }
                                     _debounce = Timer(
                                       const Duration(milliseconds: 400),
                                       () {
@@ -1070,8 +1028,7 @@ class _TelaBuscaState extends State<TelaBusca> {
                               ),
                               children: [
                                 TileLayer(
-                                  urlTemplate:
-                                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                                   userAgentPackageName: 'com.seusistema.sos',
                                 ),
                                 MarkerLayer(markers: marcadores),
@@ -1121,23 +1078,14 @@ class _TelaBuscaState extends State<TelaBusca> {
                                   itemCount: semaforosFiltrados.length,
                                   itemBuilder: (context, index) {
                                     var doc = semaforosFiltrados[index];
-                                    var data =
-                                        doc.data() as Map<String, dynamic>;
-                                    String idFormatado = _formatarId(
-                                      data['id'] ?? '',
-                                    );
-                                    LatLng? coords = _parseLatLng(
-                                      data['georeferencia'],
-                                    );
+                                    var data = doc.data() as Map<String, dynamic>;
+                                    String idFormatado = _formatarId(data['id'] ?? '');
+                                    LatLng? coords = _parseLatLng(data['georeferencia']);
 
-                                    String nomeEmpresa = (data['empresa'] ?? '')
-                                        .toString()
-                                        .toUpperCase();
+                                    String nomeEmpresa = (data['empresa'] ?? '').toString().toUpperCase();
                                     Color corTagEmpresa = Colors.grey;
-                                    if (nomeEmpresa.contains('SERTTEL'))
-                                      corTagEmpresa = Colors.orange.shade700;
-                                    if (nomeEmpresa.contains('SINALVIDA'))
-                                      corTagEmpresa = Colors.blue.shade700;
+                                    if (nomeEmpresa.contains('SERTTEL')) corTagEmpresa = Colors.orange.shade700;
+                                    if (nomeEmpresa.contains('SINALVIDA')) corTagEmpresa = Colors.blue.shade700;
 
                                     return Card(
                                       margin: const EdgeInsets.only(bottom: 8),
@@ -1153,15 +1101,13 @@ class _TelaBuscaState extends State<TelaBusca> {
                                             ),
                                             if (nomeEmpresa.isNotEmpty)
                                               Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 6,
-                                                      vertical: 2,
-                                                    ),
+                                                padding: const EdgeInsets.symmetric(
+                                                  horizontal: 6,
+                                                  vertical: 2,
+                                                ),
                                                 decoration: BoxDecoration(
                                                   color: corTagEmpresa,
-                                                  borderRadius:
-                                                      BorderRadius.circular(4),
+                                                  borderRadius: BorderRadius.circular(4),
                                                 ),
                                                 child: Text(
                                                   nomeEmpresa,
@@ -1175,8 +1121,7 @@ class _TelaBuscaState extends State<TelaBusca> {
                                           ],
                                         ),
                                         subtitle: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
+                                          crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
                                             const SizedBox(height: 4),
                                             Text(
@@ -1189,9 +1134,7 @@ class _TelaBuscaState extends State<TelaBusca> {
                                             ),
                                             Text(
                                               '${data['bairro'] ?? ''} | Sub: ${data['subareas'] ?? ''}',
-                                              style: const TextStyle(
-                                                fontSize: 11,
-                                              ),
+                                              style: const TextStyle(fontSize: 11),
                                             ),
                                           ],
                                         ),
@@ -1202,17 +1145,11 @@ class _TelaBuscaState extends State<TelaBusca> {
                                         onTap: () {
                                           if (coords != null) {
                                             _focarNoMapa(coords);
-                                            _abrirDetalhesResumidos(
-                                              data,
-                                            ); // AQUI CHAMA O NOVO MODAL
+                                            _abrirDetalhesResumidos(data);
                                           } else {
-                                            ScaffoldMessenger.of(
-                                              context,
-                                            ).showSnackBar(
+                                            ScaffoldMessenger.of(context).showSnackBar(
                                               const SnackBar(
-                                                content: Text(
-                                                  'Semáforo sem coordenada de GPS cadastrada!',
-                                                ),
+                                                content: Text('Semáforo sem coordenada de GPS cadastrada!'),
                                               ),
                                             );
                                           }

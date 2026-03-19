@@ -428,7 +428,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(8),
-                        // Border.all cria borda em todos os lados. Se quisermos apenas em cima, usamos Border(top: ...)
                         border: const Border(
                           top: BorderSide(color: Colors.orange, width: 4),
                         ),
@@ -723,16 +722,17 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                       const SizedBox(height: 20),
                     ],
 
-                    // --- PLANOS ---
+                    // --- PLANOS (CORREÇÃO APLICADA AQUI) ---
                     if (_planos.isNotEmpty) ...[
                       _buildSectionTitle('TEMPOS DOS PLANOS'),
+                      
+                      // O uso do map aqui agora está correto e limpo
                       ..._planos.map((p) {
                         return Container(
                           margin: const EdgeInsets.only(top: 8),
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(6),
-                            // Bordas com lateral azul esquerda mais grossa
                             border: Border(
                               top: BorderSide(color: Colors.grey.shade300),
                               right: BorderSide(color: Colors.grey.shade300),
