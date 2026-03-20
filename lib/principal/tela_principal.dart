@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:sos_cttu/principal/equipes/tela_equipes.dart';
-import 'package:sos_cttu/principal/mapa/tela_mapa_ocorrencias.dart';
 
 // Importações das telas do sistema
 import 'busca/tela_busca.dart';
@@ -10,6 +9,7 @@ import 'ocorrencias/tela_ocorrencias.dart';
 import 'ocorrencias/tela_mapa_ocorrencias.dart';
 import 'dashboard/tela_dashboard.dart';
 import 'relatorios/tela_relatorios.dart';
+import 'relatorios/tela_mapa_relatorios.dart';
 
 // Importação do MENU REUTILIZÁVEL
 import '../widgets/menu_usuario.dart';

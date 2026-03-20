@@ -47,7 +47,7 @@ class SosApp extends StatelessWidget {
       ),
 
       // Aponta para a tela principal (com o fundo do semáforo e os botões dos módulos)
-      home: const TelaLogin(),
+      home: const TelaPrincipal(),
     );
   }
 }
