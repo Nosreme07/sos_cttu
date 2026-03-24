@@ -16,7 +16,6 @@ import 'package:printing/printing.dart';
 
 import '../../widgets/menu_usuario.dart';
 
-// --- CLASSE PARA FORÇAR TEXTO MAIÚSCULO ENQUANTO DIGITA ---
 class UpperCaseTextFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -36,7 +35,6 @@ class ListaOcorrencias extends StatefulWidget {
 }
 
 class _ListaOcorrenciasState extends State<ListaOcorrencias> {
-  // Filtros
   bool _verFinalizadas24h = false;
   final TextEditingController _filtroSemaforo = TextEditingController();
   final TextEditingController _filtroEndereco = TextEditingController();
@@ -46,15 +44,16 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
   final TextEditingController _filtroStatus = TextEditingController();
   final TextEditingController _filtroNumero = TextEditingController();
 
-  // Variáveis para Ordenação
   int? _sortColumnIndex = 5; 
   bool _sortAscending = false; 
 
-  // Listas Auxiliares
   List<Map<String, dynamic>> _semaforosAux = [];
   List<Map<String, dynamic>> _falhasAux = [];
-  List<String> _origensAux = [];
-  List<String> _estoqueAux = [];
+  
+  // Listas Otimizadas para o Modal
+  List<String> _opcoesSemaforos = [];
+  List<String> _opcoesFalhas = [];
+  List<String> _opcoesOrigens = [];
 
   Timer? _debounce;
   final ImagePicker _picker = ImagePicker();
@@ -85,7 +84,6 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
     return numeros.padLeft(3, '0');
   }
 
-  // --- FUNÇÃO PARA BUSCAR O NOME COMPLETO DO USUÁRIO NO BANCO ---
   Future<String> _getNomeUsuario() async {
     User? usuarioLogado = FirebaseAuth.instance.currentUser;
     if (usuarioLogado == null) return 'SISTEMA';
@@ -139,41 +137,43 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
     try {
       final s = await FirebaseFirestore.instance.collection('semaforos').get();
       final f = await FirebaseFirestore.instance.collection('falhas').get();
-      final e = await FirebaseFirestore.instance.collection('estoque').get();
       final o = await FirebaseFirestore.instance.collection('origens').get();
 
+      List<Map<String, dynamic>> semaforosLocal = s.docs.map<Map<String, dynamic>>((doc) {
+        var d = doc.data();
+        return <String, dynamic>{
+          'id': _formatarId((d['id'] ?? '').toString()),
+          'endereco': (d['endereco'] ?? '').toString(),
+          'bairro': (d['bairro'] ?? '').toString(),
+          'empresa': (d['empresa'] ?? '').toString(),
+        };
+      }).toList();
+      semaforosLocal.sort((a, b) => a['id'].toString().compareTo(b['id'].toString()));
+
+      List<Map<String, dynamic>> falhasLocal = f.docs.map<Map<String, dynamic>>((doc) {
+        var d = doc.data();
+        return <String, dynamic>{
+          'falha': (d['tipo_da_falha'] ?? d['falha'] ?? '').toString(),
+          'prioridade': (d['prioridade'] ?? 'MÉDIA').toString(),
+          'prazo': (d['prazo'] ?? '').toString(),
+        };
+      }).where((item) => item['falha'].toString().isNotEmpty).toList();
+      falhasLocal.sort((a, b) => a['falha'].toString().compareTo(b['falha'].toString()));
+
+      List<String> origensLocal = o.docs.map((doc) {
+        var d = doc.data();
+        return (d['origem'] ?? '').toString();
+      }).where((origem) => origem.isNotEmpty).toList();
+      origensLocal.sort();
+
       setState(() {
-        _semaforosAux = s.docs.map<Map<String, dynamic>>((doc) {
-          var d = doc.data() as Map<String, dynamic>;
-          return <String, dynamic>{
-            'id': _formatarId((d['id'] ?? '').toString()),
-            'endereco': (d['endereco'] ?? '').toString(),
-            'bairro': (d['bairro'] ?? '').toString(),
-            'empresa': (d['empresa'] ?? '').toString(),
-          };
-        }).toList();
-        _semaforosAux.sort((a, b) => a['id'].toString().compareTo(b['id'].toString()));
-
-        _falhasAux = f.docs.map<Map<String, dynamic>>((doc) {
-          var d = doc.data() as Map<String, dynamic>;
-          return <String, dynamic>{
-            'falha': (d['falha'] ?? '').toString(),
-            'prioridade': (d['prioridade'] ?? 'MÉDIA').toString(),
-            'prazo': (d['prazo'] ?? '').toString(),
-          };
-        }).where((item) => item['falha'].toString().isNotEmpty).toList();
-        _falhasAux.sort((a, b) => a['falha'].toString().compareTo(b['falha'].toString()));
-
-        _origensAux = o.docs.map((doc) {
-          var d = doc.data() as Map<String, dynamic>;
-          return (d['origem'] ?? '').toString();
-        }).where((origem) => origem.isNotEmpty).toList();
-        _origensAux.sort();
-
-        _estoqueAux = e.docs.map((doc) {
-          var d = doc.data() as Map<String, dynamic>;
-          return (d['descricao'] ?? '').toString();
-        }).toList();
+        _semaforosAux = semaforosLocal;
+        _falhasAux = falhasLocal;
+        
+        // Geração Antecipada das Listas do Modal (Otimização de Performance)
+        _opcoesSemaforos = semaforosLocal.map((sem) => "${sem['id']} - ${sem['endereco']}").toSet().toList();
+        _opcoesFalhas = falhasLocal.map((fal) => fal['falha'] as String).toSet().toList();
+        _opcoesOrigens = origensLocal.toSet().toList();
       });
     } catch (e) {
       debugPrint("Erro ao carregar auxiliares: $e");
@@ -254,6 +254,7 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
     }
   }
 
+  // --- MODAL DE CADASTRO OTIMIZADO ---
   void _abrirModalCadastro({String? docId, Map<String, dynamic>? dadosAtuais}) {
     final formKey = GlobalKey<FormState>();
     bool estaSalvando = false;
@@ -262,19 +263,19 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
     String falhaSel = dadosAtuais?['tipo_da_falha'] ?? '';
     String origemSel = dadosAtuais?['origem_da_ocorrencia'] ?? '';
 
-    List<String> opcoesSemaforos = _semaforosAux.map((s) => "${s['id']} - ${s['endereco']}").toSet().toList();
-    if (semaforoSel.isNotEmpty && !opcoesSemaforos.any((e) => e.startsWith(semaforoSel))) {
-      opcoesSemaforos.add(semaforoSel);
+    String semaforoDropdownValue = '';
+    if (semaforoSel.isNotEmpty) {
+      int idx = _opcoesSemaforos.indexWhere((e) => e.startsWith(semaforoSel));
+      if (idx != -1) {
+        semaforoDropdownValue = _opcoesSemaforos[idx];
+      } else {
+        _opcoesSemaforos.add(semaforoSel);
+        semaforoDropdownValue = semaforoSel;
+      }
     }
-    String semaforoDropdownValue = semaforoSel.isEmpty
-        ? ''
-        : opcoesSemaforos.firstWhere((e) => e.startsWith(semaforoSel), orElse: () => semaforoSel);
 
-    List<String> opcoesFalhas = _falhasAux.map((f) => f['falha'] as String).toSet().toList();
-    if (falhaSel.isNotEmpty && !opcoesFalhas.contains(falhaSel)) opcoesFalhas.add(falhaSel);
-
-    List<String> opcoesOrigens = _origensAux.toSet().toList();
-    if (origemSel.isNotEmpty && !opcoesOrigens.contains(origemSel)) opcoesOrigens.add(origemSel);
+    if (falhaSel.isNotEmpty && !_opcoesFalhas.contains(falhaSel)) _opcoesFalhas.add(falhaSel);
+    if (origemSel.isNotEmpty && !_opcoesOrigens.contains(origemSel)) _opcoesOrigens.add(origemSel);
 
     final semaforoMenuCtrl = TextEditingController(text: semaforoDropdownValue);
     final falhaMenuCtrl = TextEditingController(text: falhaSel);
@@ -304,44 +305,38 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                 ),
                 const Divider(),
                 const SizedBox(height: 10),
-                LayoutBuilder(builder: (context, constraints) {
-                  return DropdownMenu<String>(
-                    width: constraints.maxWidth,
-                    controller: semaforoMenuCtrl,
-                    enableFilter: true, enableSearch: true,
-                    label: const Text('Semáforo *'),
-                    inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
-                    initialSelection: semaforoDropdownValue.isEmpty ? null : semaforoDropdownValue,
-                    dropdownMenuEntries: opcoesSemaforos.map((s) => DropdownMenuEntry(value: s, label: s)).toList(),
-                    onSelected: (val) => semaforoSel = val ?? '',
-                  );
-                }),
+                DropdownMenu<String>(
+                  expandedInsets: EdgeInsets.zero, // Preenche a largura sem precisar de LayoutBuilder
+                  controller: semaforoMenuCtrl,
+                  enableFilter: true, enableSearch: true,
+                  label: const Text('Semáforo *'),
+                  inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
+                  initialSelection: semaforoDropdownValue.isEmpty ? null : semaforoDropdownValue,
+                  dropdownMenuEntries: _opcoesSemaforos.map((s) => DropdownMenuEntry(value: s, label: s)).toList(),
+                  onSelected: (val) => semaforoSel = val ?? '',
+                ),
                 const SizedBox(height: 12),
-                LayoutBuilder(builder: (context, constraints) {
-                  return DropdownMenu<String>(
-                    width: constraints.maxWidth,
-                    controller: falhaMenuCtrl,
-                    enableFilter: true, enableSearch: true,
-                    label: const Text('Tipo da Falha *'),
-                    inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
-                    initialSelection: falhaSel.isEmpty ? null : falhaSel,
-                    dropdownMenuEntries: opcoesFalhas.map((f) => DropdownMenuEntry(value: f, label: f)).toList(),
-                    onSelected: (val) => falhaSel = val ?? '',
-                  );
-                }),
+                DropdownMenu<String>(
+                  expandedInsets: EdgeInsets.zero,
+                  controller: falhaMenuCtrl,
+                  enableFilter: true, enableSearch: true,
+                  label: const Text('Tipo da Falha *'),
+                  inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
+                  initialSelection: falhaSel.isEmpty ? null : falhaSel,
+                  dropdownMenuEntries: _opcoesFalhas.map((f) => DropdownMenuEntry(value: f, label: f)).toList(),
+                  onSelected: (val) => falhaSel = val ?? '',
+                ),
                 const SizedBox(height: 12),
-                LayoutBuilder(builder: (context, constraints) {
-                  return DropdownMenu<String>(
-                    width: constraints.maxWidth,
-                    controller: origemMenuCtrl,
-                    enableFilter: true, enableSearch: true,
-                    label: const Text('Origem *'),
-                    inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
-                    initialSelection: origemSel.isEmpty ? null : origemSel,
-                    dropdownMenuEntries: opcoesOrigens.map((o) => DropdownMenuEntry(value: o, label: o)).toList(),
-                    onSelected: (val) => origemSel = val ?? '',
-                  );
-                }),
+                DropdownMenu<String>(
+                  expandedInsets: EdgeInsets.zero,
+                  controller: origemMenuCtrl,
+                  enableFilter: true, enableSearch: true,
+                  label: const Text('Origem *'),
+                  inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
+                  initialSelection: origemSel.isEmpty ? null : origemSel,
+                  dropdownMenuEntries: _opcoesOrigens.map((o) => DropdownMenuEntry(value: o, label: o)).toList(),
+                  onSelected: (val) => origemSel = val ?? '',
+                ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: detalhesCtrl,
@@ -356,15 +351,15 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                   onPressed: estaSalvando
                       ? null
                       : () async {
-                          if (semaforoMenuCtrl.text.isEmpty || !opcoesSemaforos.contains(semaforoMenuCtrl.text)) {
+                          if (semaforoMenuCtrl.text.isEmpty || !_opcoesSemaforos.contains(semaforoMenuCtrl.text)) {
                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione um semáforo válido!')));
                             return;
                           }
-                          if (falhaMenuCtrl.text.isEmpty || !opcoesFalhas.contains(falhaMenuCtrl.text)) {
+                          if (falhaMenuCtrl.text.isEmpty || !_opcoesFalhas.contains(falhaMenuCtrl.text)) {
                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione uma falha válida!')));
                             return;
                           }
-                          if (origemMenuCtrl.text.isEmpty || !opcoesOrigens.contains(origemMenuCtrl.text)) {
+                          if (origemMenuCtrl.text.isEmpty || !_opcoesOrigens.contains(origemMenuCtrl.text)) {
                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione uma origem válida!')));
                             return;
                           }
@@ -376,7 +371,6 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                               String falhaFinal = falhaMenuCtrl.text;
                               String origemFinal = origemMenuCtrl.text;
 
-                              // --- TRAVA DE DUPLICIDADE ---
                               QuerySnapshot duplicatas = await FirebaseFirestore.instance
                                   .collection('Gerenciamento_ocorrencias')
                                   .where('semaforo', isEqualTo: semaforoFinal)
@@ -384,7 +378,7 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                                   .get();
 
                               bool existeAtiva = duplicatas.docs.any((docSnap) {
-                                if (docId != null && docSnap.id == docId) return false; // Ignora ela mesma na edição
+                                if (docId != null && docSnap.id == docId) return false; 
                                 String statusStr = (docSnap.data() as Map<String, dynamic>)['status']?.toString().toLowerCase() ?? '';
                                 return !statusStr.contains('finaliz') && !statusStr.contains('conclu');
                               });
@@ -400,7 +394,6 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                                 setStateModal(() => estaSalvando = false);
                                 return;
                               }
-                              // ------------------------------
 
                               var semInfo = _semaforosAux.firstWhere((s) => s['id'] == semaforoFinal, orElse: () => <String, dynamic>{});
                               var falhaInfo = _falhasAux.firstWhere((f) => f['falha'] == falhaFinal, orElse: () => <String, dynamic>{});
@@ -539,9 +532,8 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
     final acaoCtrl = TextEditingController();
     List<Uint8List> fotosSelecionadas = [];
 
-    List<String> opcoesFalhas = _falhasAux.map((f) => f['falha'] as String).toSet().toList();
-    if (falha.isNotEmpty && !opcoesFalhas.contains(falha)) {
-      opcoesFalhas.add(falha);
+    if (falha.isNotEmpty && !_opcoesFalhas.contains(falha)) {
+      _opcoesFalhas.add(falha);
     }
     final falhaMenuCtrl = TextEditingController(text: falha);
 
@@ -581,17 +573,15 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                   },
                 ),
                 if (defeitoConstatado) ...[
-                  LayoutBuilder(builder: (context, constraints) {
-                    return DropdownMenu<String>(
-                      width: constraints.maxWidth,
-                      controller: falhaMenuCtrl,
-                      enableFilter: true, enableSearch: true,
-                      label: const Text('Falha Encontrada *'),
-                      inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
-                      initialSelection: falha.isEmpty ? null : falha,
-                      dropdownMenuEntries: opcoesFalhas.map((f) => DropdownMenuEntry(value: f, label: f)).toList(),
-                    );
-                  }),
+                  DropdownMenu<String>(
+                    expandedInsets: EdgeInsets.zero,
+                    controller: falhaMenuCtrl,
+                    enableFilter: true, enableSearch: true,
+                    label: const Text('Falha Encontrada *'),
+                    inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
+                    initialSelection: falha.isEmpty ? null : falha,
+                    dropdownMenuEntries: _opcoesFalhas.map((f) => DropdownMenuEntry(value: f, label: f)).toList(),
+                  ),
                   const SizedBox(height: 10),
                   TextFormField(
                     controller: descricaoCtrl,

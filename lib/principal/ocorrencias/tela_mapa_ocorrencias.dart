@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -14,9 +13,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/services.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 
 import '../../widgets/menu_usuario.dart';
 
@@ -64,7 +60,11 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
   
   List<Map<String, dynamic>> _semaforosAux = [];
   List<Map<String, dynamic>> _falhasAux = [];
-  List<String> _origensAux = [];
+  
+  // Listas Otimizadas para o Modal de Cadastro
+  List<String> _opcoesSemaforos = [];
+  List<String> _opcoesFalhas = [];
+  List<String> _opcoesOrigens = [];
 
   late Stream<QuerySnapshot> _streamOcorrencias;
   late Stream<QuerySnapshot> _streamEquipes;
@@ -206,7 +206,11 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
           _mapaCoordenadasSemaforos = coords;
           _semaforosAux = semaforosLocal;
           _falhasAux = falhasLocal;
-          _origensAux = origensLocal;
+          
+          // Geração Antecipada das Listas do Modal (Otimização)
+          _opcoesSemaforos = semaforosLocal.map((sem) => "${sem['id']} - ${sem['endereco']}").toSet().toList();
+          _opcoesFalhas = falhasLocal.map((fal) => fal['falha'] as String).toSet().toList();
+          _opcoesOrigens = origensLocal.toSet().toList();
         });
       }
     } catch (e) {
@@ -239,21 +243,6 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
       return pngBytes.buffer.asUint8List();
     } catch (e) {
       return imageBytes;
-    }
-  }
-
-  void _atualizarListaEmpresas() {
-    Set<String> emps = {};
-    for (var oc in _todasOcorrencias) {
-      String e = (oc.data() as Map<String, dynamic>)['empresa_responsavel'] ?? '';
-      if (e.isNotEmpty) emps.add(e);
-    }
-    List<String> lista = emps.toList()..sort();
-    lista.insert(0, 'TODAS');
-    if (_empresasOptions.length != lista.length) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        setState(() => _empresasOptions = lista);
-      });
     }
   }
 
@@ -303,7 +292,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
   }
 
   // =================================================================================
-  // MODAIS (CADASTRO E FINALIZAÇÃO)
+  // MODAIS (CADASTRO E FINALIZAÇÃO) - OTIMIZADOS
   // =================================================================================
 
   void _abrirModalCadastro({String? docId, Map<String, dynamic>? dadosAtuais}) {
@@ -314,15 +303,19 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
     String falhaSel = dadosAtuais?['tipo_da_falha'] ?? '';
     String origemSel = dadosAtuais?['origem_da_ocorrencia'] ?? '';
 
-    List<String> opcoesSemaforos = _semaforosAux.map((s) => "${s['id']} - ${s['endereco']}").toSet().toList();
-    if (semaforoSel.isNotEmpty && !opcoesSemaforos.any((e) => e.startsWith(semaforoSel))) opcoesSemaforos.add(semaforoSel);
-    String semaforoDropdownValue = semaforoSel.isEmpty ? '' : opcoesSemaforos.firstWhere((e) => e.startsWith(semaforoSel), orElse: () => semaforoSel);
+    String semaforoDropdownValue = '';
+    if (semaforoSel.isNotEmpty) {
+      int idx = _opcoesSemaforos.indexWhere((e) => e.startsWith(semaforoSel));
+      if (idx != -1) {
+        semaforoDropdownValue = _opcoesSemaforos[idx];
+      } else {
+        _opcoesSemaforos.add(semaforoSel);
+        semaforoDropdownValue = semaforoSel;
+      }
+    }
 
-    List<String> opcoesFalhas = _falhasAux.map((f) => f['falha'] as String).toSet().toList();
-    if (falhaSel.isNotEmpty && !opcoesFalhas.contains(falhaSel)) opcoesFalhas.add(falhaSel);
-
-    List<String> opcoesOrigens = _origensAux.toSet().toList();
-    if (origemSel.isNotEmpty && !opcoesOrigens.contains(origemSel)) opcoesOrigens.add(origemSel);
+    if (falhaSel.isNotEmpty && !_opcoesFalhas.contains(falhaSel)) _opcoesFalhas.add(falhaSel);
+    if (origemSel.isNotEmpty && !_opcoesOrigens.contains(origemSel)) _opcoesOrigens.add(origemSel);
 
     final semaforoMenuCtrl = TextEditingController(text: semaforoDropdownValue);
     final falhaMenuCtrl = TextEditingController(text: falhaSel);
@@ -336,48 +329,60 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) => StatefulBuilder(
         builder: (context, setStateModal) => Padding(
-          padding: EdgeInsets.only(top: 24, left: 24, right: 24, bottom: MediaQuery.of(context).viewInsets.bottom + 24),
+          padding: EdgeInsets.only(
+            top: 24, left: 24, right: 24,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+          ),
           child: Form(
             key: formKey,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(docId == null ? 'Nova Ocorrência' : 'Editar Ocorrência', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF2c3e50))),
+                Text(
+                  docId == null ? 'Nova Ocorrência' : 'Editar Ocorrência',
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF2c3e50)),
+                ),
                 const Divider(),
                 const SizedBox(height: 10),
-                LayoutBuilder(builder: (context, constraints) {
-                  return DropdownMenu<String>(
-                    width: constraints.maxWidth, controller: semaforoMenuCtrl, enableFilter: true, enableSearch: true, label: const Text('Semáforo *'),
-                    inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
-                    initialSelection: semaforoDropdownValue.isEmpty ? null : semaforoDropdownValue,
-                    dropdownMenuEntries: opcoesSemaforos.map((s) => DropdownMenuEntry(value: s, label: s)).toList(),
-                    onSelected: (val) => semaforoSel = val ?? '',
-                  );
-                }),
+                DropdownMenu<String>(
+                  expandedInsets: EdgeInsets.zero, 
+                  controller: semaforoMenuCtrl,
+                  enableFilter: true, enableSearch: true,
+                  label: const Text('Semáforo *'),
+                  inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
+                  initialSelection: semaforoDropdownValue.isEmpty ? null : semaforoDropdownValue,
+                  dropdownMenuEntries: _opcoesSemaforos.map((s) => DropdownMenuEntry(value: s, label: s)).toList(),
+                  onSelected: (val) => semaforoSel = val ?? '',
+                ),
                 const SizedBox(height: 12),
-                LayoutBuilder(builder: (context, constraints) {
-                  return DropdownMenu<String>(
-                    width: constraints.maxWidth, controller: falhaMenuCtrl, enableFilter: true, enableSearch: true, label: const Text('Tipo da Falha *'),
-                    inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
-                    initialSelection: falhaSel.isEmpty ? null : falhaSel,
-                    dropdownMenuEntries: opcoesFalhas.map((f) => DropdownMenuEntry(value: f, label: f)).toList(),
-                    onSelected: (val) => falhaSel = val ?? '',
-                  );
-                }),
+                DropdownMenu<String>(
+                  expandedInsets: EdgeInsets.zero,
+                  controller: falhaMenuCtrl,
+                  enableFilter: true, enableSearch: true,
+                  label: const Text('Tipo da Falha *'),
+                  inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
+                  initialSelection: falhaSel.isEmpty ? null : falhaSel,
+                  dropdownMenuEntries: _opcoesFalhas.map((f) => DropdownMenuEntry(value: f, label: f)).toList(),
+                  onSelected: (val) => falhaSel = val ?? '',
+                ),
                 const SizedBox(height: 12),
-                LayoutBuilder(builder: (context, constraints) {
-                  return DropdownMenu<String>(
-                    width: constraints.maxWidth, controller: origemMenuCtrl, enableFilter: true, enableSearch: true, label: const Text('Origem *'),
-                    inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
-                    initialSelection: origemSel.isEmpty ? null : origemSel,
-                    dropdownMenuEntries: opcoesOrigens.map((o) => DropdownMenuEntry(value: o, label: o)).toList(),
-                    onSelected: (val) => origemSel = val ?? '',
-                  );
-                }),
+                DropdownMenu<String>(
+                  expandedInsets: EdgeInsets.zero,
+                  controller: origemMenuCtrl,
+                  enableFilter: true, enableSearch: true,
+                  label: const Text('Origem *'),
+                  inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
+                  initialSelection: origemSel.isEmpty ? null : origemSel,
+                  dropdownMenuEntries: _opcoesOrigens.map((o) => DropdownMenuEntry(value: o, label: o)).toList(),
+                  onSelected: (val) => origemSel = val ?? '',
+                ),
                 const SizedBox(height: 12),
                 TextFormField(
-                  controller: detalhesCtrl, maxLines: 3, textCapitalization: TextCapitalization.characters, inputFormatters: [UpperCaseTextFormatter()],
+                  controller: detalhesCtrl,
+                  maxLines: 3,
+                  textCapitalization: TextCapitalization.characters,
+                  inputFormatters: [UpperCaseTextFormatter()],
                   decoration: const InputDecoration(labelText: 'Detalhes da Ocorrência', border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 16),
@@ -386,9 +391,18 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                   onPressed: estaSalvando
                       ? null
                       : () async {
-                          if (semaforoMenuCtrl.text.isEmpty || !opcoesSemaforos.contains(semaforoMenuCtrl.text)) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione um semáforo válido!'))); return; }
-                          if (falhaMenuCtrl.text.isEmpty || !opcoesFalhas.contains(falhaMenuCtrl.text)) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione uma falha válida!'))); return; }
-                          if (origemMenuCtrl.text.isEmpty || !opcoesOrigens.contains(origemMenuCtrl.text)) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione uma origem válida!'))); return; }
+                          if (semaforoMenuCtrl.text.isEmpty || !_opcoesSemaforos.contains(semaforoMenuCtrl.text)) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione um semáforo válido!')));
+                            return;
+                          }
+                          if (falhaMenuCtrl.text.isEmpty || !_opcoesFalhas.contains(falhaMenuCtrl.text)) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione uma falha válida!')));
+                            return;
+                          }
+                          if (origemMenuCtrl.text.isEmpty || !_opcoesOrigens.contains(origemMenuCtrl.text)) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione uma origem válida!')));
+                            return;
+                          }
                           
                           if (formKey.currentState!.validate()) {
                             setStateModal(() => estaSalvando = true);
@@ -397,7 +411,12 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                               String falhaFinal = falhaMenuCtrl.text;
                               String origemFinal = origemMenuCtrl.text;
 
-                              QuerySnapshot duplicatas = await FirebaseFirestore.instance.collection('Gerenciamento_ocorrencias').where('semaforo', isEqualTo: semaforoFinal).where('tipo_da_falha', isEqualTo: falhaFinal).get();
+                              QuerySnapshot duplicatas = await FirebaseFirestore.instance
+                                  .collection('Gerenciamento_ocorrencias')
+                                  .where('semaforo', isEqualTo: semaforoFinal)
+                                  .where('tipo_da_falha', isEqualTo: falhaFinal)
+                                  .get();
+
                               bool existeAtiva = duplicatas.docs.any((docSnap) {
                                 if (docId != null && docSnap.id == docId) return false; 
                                 String statusStr = (docSnap.data() as Map<String, dynamic>)['status']?.toString().toLowerCase() ?? '';
@@ -405,7 +424,13 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                               });
 
                               if (existeAtiva) {
-                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Já existe uma ocorrência EM ANDAMENTO com esta mesma falha para este semáforo!', style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.red, duration: Duration(seconds: 4)));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Já existe uma ocorrência EM ANDAMENTO com esta mesma falha para este semáforo!', style: TextStyle(fontWeight: FontWeight.bold)),
+                                      backgroundColor: Colors.red,
+                                      duration: Duration(seconds: 4),
+                                    )
+                                );
                                 setStateModal(() => estaSalvando = false);
                                 return;
                               }
@@ -433,6 +458,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                                 payload['endereco'] = semInfo['endereco'] ?? '';
                                 payload['bairro'] = semInfo['bairro'] ?? '';
                                 payload['usuario_abertura'] = nomeUsuario; 
+                                
                                 await FirebaseFirestore.instance.collection('Gerenciamento_ocorrencias').add(payload);
                               } else {
                                 await FirebaseFirestore.instance.collection('Gerenciamento_ocorrencias').doc(docId).update(payload);
@@ -445,7 +471,9 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                             }
                           }
                         },
-                  child: estaSalvando ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('Salvar Ocorrência', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  child: estaSalvando
+                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Text('Salvar Ocorrência', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
               ],
             ),
@@ -465,9 +493,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
     final acaoCtrl = TextEditingController();
     List<Uint8List> fotosSelecionadas = [];
 
-    List<String> opcoesFalhas = _falhasAux.map((f) => f['falha'] as String).toSet().toList();
-    if (falha.isNotEmpty && !opcoesFalhas.contains(falha)) {
-      opcoesFalhas.add(falha);
+    if (falha.isNotEmpty && !_opcoesFalhas.contains(falha)) {
+      _opcoesFalhas.add(falha);
     }
     final falhaMenuCtrl = TextEditingController(text: falha);
 
@@ -507,17 +534,15 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                   },
                 ),
                 if (defeitoConstatado) ...[
-                  LayoutBuilder(builder: (context, constraints) {
-                    return DropdownMenu<String>(
-                      width: constraints.maxWidth,
-                      controller: falhaMenuCtrl,
-                      enableFilter: true, enableSearch: true,
-                      label: const Text('Falha Encontrada *'),
-                      inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
-                      initialSelection: falha.isEmpty ? null : falha,
-                      dropdownMenuEntries: opcoesFalhas.map((f) => DropdownMenuEntry(value: f, label: f)).toList(),
-                    );
-                  }),
+                  DropdownMenu<String>(
+                    expandedInsets: EdgeInsets.zero,
+                    controller: falhaMenuCtrl,
+                    enableFilter: true, enableSearch: true,
+                    label: const Text('Falha Encontrada *'),
+                    inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
+                    initialSelection: falha.isEmpty ? null : falha,
+                    dropdownMenuEntries: _opcoesFalhas.map((f) => DropdownMenuEntry(value: f, label: f)).toList(),
+                  ),
                   const SizedBox(height: 10),
                   TextFormField(
                     controller: descricaoCtrl,
@@ -754,6 +779,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                         await FirebaseFirestore.instance.collection('Gerenciamento_ocorrencias').doc(docIdOcorrencia).update({
                           'equipe_atrelada': nomeLider,
                           'equipe_responsavel': nomeLider,
+                          'integrantes_equipe': ints, 
                           'placa_veiculo': placa,
                           'equipe_responsavel_id': eq.id,
                           'status': 'Em deslocamento',
@@ -799,8 +825,6 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
     Color corBase = Colors.redAccent;
     if (st.contains('deslocamento')) corBase = Colors.orange;
     if (st.contains('atendimento')) corBase = Colors.green;
-
-    String prioridade = _mapaPrioridades[data['tipo_da_falha']] ?? 'MÉDIA';
     
     String empresa = (data['empresa_semaforo'] ?? '').toString();
     if (empresa.isEmpty) {
