@@ -1,11 +1,26 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:excel/excel.dart' hide Border, TextSpan;
 
 import '../../widgets/menu_usuario.dart';
+
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    return TextEditingValue(
+      text: newValue.text.toUpperCase(),
+      selection: newValue.selection,
+    );
+  }
+}
 
 class TelaRelatorioRecorrencias extends StatefulWidget {
   const TelaRelatorioRecorrencias({super.key});
@@ -24,67 +39,77 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
   List<String> _empresas = [];
   List<String> _falhas = [];
 
+  bool _isLoading = true;
+  List<QueryDocumentSnapshot> _todasOcorrenciasCache = [];
+  List<Map<String, dynamic>> _rankingGerado = [];
+
   @override
   void initState() {
     super.initState();
-    _carregarFiltros();
+    _inicializarDados();
   }
 
-  Future<void> _carregarFiltros() async {
-    final resFalhas = await FirebaseFirestore.instance
-        .collection('falhas')
-        .get();
-    final resOcorrencias = await FirebaseFirestore.instance
-        .collection('ocorrencias')
-        .get();
+  Future<void> _inicializarDados() async {
+    setState(() => _isLoading = true);
 
-    Set<String> empSet = {};
-    for (var doc in resOcorrencias.docs) {
-      String emp = (doc.data()['empresa_responsavel'] ?? '')
-          .toString()
-          .toUpperCase();
-      if (emp.isNotEmpty) empSet.add(emp);
+    try {
+      final resFalhas =
+          await FirebaseFirestore.instance.collection('falhas').get();
+      final resEmpresas =
+          await FirebaseFirestore.instance.collection('empresas').get();
+      final resOcorrencias = await FirebaseFirestore.instance
+          .collection('Gerenciamento_ocorrencias')
+          .get();
+
+      _todasOcorrenciasCache = resOcorrencias.docs;
+
+      Set<String> empSet = {};
+      for (var doc in resEmpresas.docs) {
+        String emp = (doc.data()['nome'] ?? doc.data()['empresa'] ?? doc.id)
+            .toString()
+            .toUpperCase();
+        if (emp.isNotEmpty) empSet.add(emp);
+      }
+
+      List<String> falhasTemp = resFalhas.docs
+          .map((d) =>
+              (d['tipo_da_falha'] ?? d['falha'] ?? '').toString().toUpperCase())
+          .toSet()
+          .toList();
+      falhasTemp.sort();
+
+      List<String> empresasTemp = empSet.toList();
+      empresasTemp.sort();
+
+      if (mounted) {
+        setState(() {
+          _falhas = falhasTemp;
+          _empresas = empresasTemp;
+        });
+
+        await _gerarRankingAsync();
+      }
+    } catch (e) {
+      debugPrint("Erro ao inicializar dados: $e");
+      if (mounted) setState(() => _isLoading = false);
     }
-
-    setState(() {
-      _falhas =
-          resFalhas.docs
-              .map((d) => (d['tipo_da_falha'] ?? '').toString())
-              .toList()
-            ..sort();
-      _empresas = empSet.toList()..sort();
-    });
   }
 
-  void _limparFiltros() {
-    setState(() {
-      _dataInicio = null;
-      _dataFim = null;
-      _filtroEmpresa = '';
-      _filtroFalha = '';
-    });
-  }
+  Future<void> _gerarRankingAsync() async {
+    setState(() => _isLoading = true);
 
-  String _formatarDataStr(DateTime? dt) {
-    if (dt == null) return '';
-    return DateFormat('dd/MM/yyyy').format(dt);
-  }
+    await Future.delayed(const Duration(milliseconds: 100));
 
-  String _formatarDataTime(Timestamp? t) {
-    if (t == null) return '---';
-    return DateFormat('dd/MM/yy HH:mm').format(t.toDate());
-  }
-
-  // --- LÓGICA DE AGRUPAMENTO (RANKING) ---
-  List<Map<String, dynamic>> _gerarRanking(List<QueryDocumentSnapshot> docs) {
-    // 1. Filtrar
-    var filtrados = docs.where((doc) {
+    var filtrados = _todasOcorrenciasCache.where((doc) {
       var d = doc.data() as Map<String, dynamic>;
 
       if (_filtroEmpresa.isNotEmpty &&
-          d['empresa_responsavel'] != _filtroEmpresa)
-        return false;
-      if (_filtroFalha.isNotEmpty && d['tipo_da_falha'] != _filtroFalha)
+          (d['empresa_semaforo'] ?? d['empresa_responsavel'] ?? '')
+                  .toString()
+                  .toUpperCase() !=
+              _filtroEmpresa) return false;
+      if (_filtroFalha.isNotEmpty &&
+          (d['tipo_da_falha'] ?? '').toString().toUpperCase() != _filtroFalha)
         return false;
 
       if (_dataInicio != null || _dataFim != null) {
@@ -92,13 +117,11 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
         DateTime dt = (d['data_de_abertura'] as Timestamp).toDate();
         if (_dataInicio != null && dt.isBefore(_dataInicio!)) return false;
         if (_dataFim != null &&
-            dt.isAfter(_dataFim!.add(const Duration(days: 1))))
-          return false;
+            dt.isAfter(_dataFim!.add(const Duration(days: 1)))) return false;
       }
       return true;
     }).toList();
 
-    // 2. Agrupar por Semáforo
     Map<String, Map<String, dynamic>> agrupado = {};
     for (var doc in filtrados) {
       var d = doc.data() as Map<String, dynamic>;
@@ -108,36 +131,61 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
         agrupado[sem] = {
           'semaforo': sem,
           'endereco': d['endereco'] ?? '',
-          'empresa': d['empresa_responsavel'] ?? 'N/D',
+          'empresa': d['empresa_semaforo'] ?? d['empresa_responsavel'] ?? 'N/D',
           'total': 0,
         };
       }
       agrupado[sem]!['total'] = (agrupado[sem]!['total'] as int) + 1;
     }
 
-    // 3. Ordenar por Total (Decrescente) e pegar Top 10
     var ranking = agrupado.values.toList();
     ranking.sort((a, b) => (b['total'] as int).compareTo(a['total'] as int));
-    return ranking.take(10).toList();
+
+    if (mounted) {
+      setState(() {
+        _rankingGerado = ranking.take(10).toList();
+        _isLoading = false;
+      });
+    }
   }
 
-  // --- MODAL: HISTÓRICO DO SEMÁFORO ---
+  void _limparFiltros() {
+    setState(() {
+      _dataInicio = null;
+      _dataFim = null;
+      _filtroEmpresa = '';
+      _filtroFalha = '';
+    });
+    _gerarRankingAsync();
+  }
+
+  String _formatarDataHoraCompleta(Timestamp? t) {
+    if (t == null) return '---';
+    return DateFormat('dd/MM/yyyy HH:mm:ss').format(t.toDate());
+  }
+
+  Color _corStatus(String status) {
+    String st = status.toLowerCase();
+    if (st.contains('aberto') || st.contains('pendente'))
+      return Colors.redAccent;
+    if (st.contains('deslocamento')) return Colors.orange;
+    if (st.contains('atendimento')) return Colors.blue;
+    if (st.contains('conclu') || st.contains('finaliz')) return Colors.green;
+    return Colors.grey;
+  }
+
   void _abrirHistorico(
-    String semaforo,
-    List<QueryDocumentSnapshot> todasOcorrencias,
-  ) {
-    // Filtra todas as ocorrências desse semáforo
+      String semaforo, List<QueryDocumentSnapshot> todasOcorrencias) {
     var historico = todasOcorrencias.where((doc) {
       var d = doc.data() as Map<String, dynamic>;
       return (d['semaforo'] ?? '').toString() == semaforo;
     }).toList();
 
-    // Ordena da mais antiga para a mais nova
     historico.sort((a, b) {
       Timestamp? tA = (a.data() as Map)['data_de_abertura'];
       Timestamp? tB = (b.data() as Map)['data_de_abertura'];
       if (tA == null || tB == null) return 0;
-      return tA.compareTo(tB);
+      return tB.compareTo(tA);
     });
 
     showDialog(
@@ -145,11 +193,9 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
       builder: (context) {
         return AlertDialog(
           title: Text(
-            'Histórico: Semáforo $semaforo',
+            'Histórico Completo: Semáforo $semaforo',
             style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Colors.blue,
-            ),
+                fontWeight: FontWeight.bold, color: Colors.blueGrey),
           ),
           content: SizedBox(
             width: double.maxFinite,
@@ -161,47 +207,52 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                     itemCount: historico.length,
                     itemBuilder: (context, index) {
                       var d = historico[index].data() as Map<String, dynamic>;
+                      String st = d['status'] ?? 'Aberto';
+
                       return Card(
-                        color: Colors.grey.shade100,
+                        margin: const EdgeInsets.only(bottom: 8),
+                        color: Colors.white,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            side: BorderSide(color: Colors.grey.shade300)),
                         child: ListTile(
                           title: Text(
                             'Ocorrência Nº ${d['numero_da_ocorrencia'] ?? historico[index].id}',
                             style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                              color: Colors.blue,
-                            ),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                color: Colors.blueGrey),
                           ),
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              const SizedBox(height: 4),
                               Text(
-                                'Abertura: ${_formatarDataTime(d['data_de_abertura'])}',
-                                style: const TextStyle(fontSize: 11),
-                              ),
+                                  'Abertura: ${_formatarDataHoraCompleta(d['data_de_abertura'])}',
+                                  style: const TextStyle(fontSize: 11)),
+                              Text('Falha: ${d['tipo_da_falha'] ?? '-'}',
+                                  style: const TextStyle(fontSize: 11)),
                               Text(
-                                'Falha: ${d['tipo_da_falha'] ?? '-'}',
-                                style: const TextStyle(fontSize: 11),
-                              ),
-                              Text(
-                                'Encontrada: ${d['falha_aparente_final'] ?? '-'}',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.black87,
-                                ),
-                              ),
+                                  'Encontrada: ${d['falha_aparente_final'] ?? '-'}',
+                                  style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black87)),
                             ],
                           ),
-                          trailing: Text(
-                            (d['status'] ?? '').toString().toUpperCase(),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 11,
-                            ),
+                          trailing: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                                color: _corStatus(st),
+                                borderRadius: BorderRadius.circular(4)),
+                            child: Text(st.toUpperCase(),
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold)),
                           ),
                           onTap: () {
-                            // Navigator.pop(context); // Se quiser fechar a lista antes de abrir detalhes
                             _abrirDetalhesCompletos(d);
                           },
                         ),
@@ -210,6 +261,14 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                   ),
           ),
           actions: [
+            TextButton.icon(
+              icon: const Icon(Icons.picture_as_pdf, color: Colors.redAccent),
+              label: const Text('Baixar PDF deste Histórico',
+                  style: TextStyle(
+                      color: Colors.redAccent, fontWeight: FontWeight.bold)),
+              onPressed: () =>
+                  _exportarPdfHistoricoSemaforo(semaforo, historico),
+            ),
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('Fechar'),
@@ -220,7 +279,6 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
     );
   }
 
-  // --- MODAL: DETALHES COMPLETOS (Aproveitado) ---
   void _abrirDetalhesCompletos(Map<String, dynamic> data) {
     showDialog(
       context: context,
@@ -229,44 +287,40 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
           title: Text(
             'Detalhes: ${data['numero_da_ocorrencia'] ?? data['id'] ?? 'S/N'}',
             style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Colors.blueGrey,
-            ),
+                fontWeight: FontWeight.bold, color: Colors.blueGrey),
           ),
           content: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
+                _buildDetailRow('Semáforo / End.',
+                    '${data['semaforo']} - ${data['endereco']}'),
                 _buildDetailRow(
-                  'Semáforo / End.',
-                  '${data['semaforo']} - ${data['endereco']}',
-                ),
-                _buildDetailRow('Empresa', data['empresa_responsavel']),
-                _buildDetailRow(
-                  'Data Abertura',
-                  _formatarDataTime(data['data_de_abertura']),
-                ),
-                _buildDetailRow('Usuário Abert.', data['usuario']),
-                _buildDetailRow('Equipe Resp.', data['equipe_responsavel']),
+                    'Empresa', data['empresa_semaforo'] ?? data['empresa_responsavel']),
+                _buildDetailRow('Origem', data['origem_da_ocorrencia']),
+                const Divider(),
+                _buildDetailRow('Data Abertura',
+                    _formatarDataHoraCompleta(data['data_de_abertura'])),
+                _buildDetailRow('Data Atendimento',
+                    _formatarDataHoraCompleta(data['data_atendimento'])),
+                _buildDetailRow('Data Finalização',
+                    _formatarDataHoraCompleta(data['data_de_finalizacao'])),
+                const Divider(),
+                _buildDetailRow('Usuário Abertura',
+                    data['usuario_abertura'] ?? data['usuario']),
+                _buildDetailRow('Equipe Resp.',
+                    data['equipe_atrelada'] ?? data['equipe_responsavel']),
                 _buildDetailRow('Placa', data['placa_veiculo']),
+                const Divider(),
                 _buildDetailRow(
-                  'Data Finalização',
-                  _formatarDataTime(data['data_de_finalizacao']),
-                ),
-                _buildDetailRow(
-                  'Status',
-                  data['status']?.toString().toUpperCase(),
-                ),
+                    'Status', data['status']?.toString().toUpperCase()),
                 _buildDetailRow('Falha Relatada', data['tipo_da_falha']),
-                _buildDetailRow(
-                  'Falha Encontrada',
-                  data['falha_aparente_final'],
-                ),
                 _buildDetailRow('Detalhes/Abertura', data['detalhes']),
-                _buildDetailRow('Descrição Equipe', data['descricao_encontro']),
+                _buildDetailRow('Falha Encontrada', data['falha_aparente_final']),
+                _buildDetailRow(
+                    'Descrição Equipe', data['descricao_encontro']),
                 _buildDetailRow('Ação Técnica', data['acao_equipe']),
-                _buildDetailRow('Materiais', data['materiais_utilizados']),
               ],
             ),
           ),
@@ -286,14 +340,12 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
       padding: const EdgeInsets.only(bottom: 8.0),
       child: RichText(
         text: TextSpan(
-          style: const TextStyle(color: Colors.black87, fontSize: 12),
+          style: const TextStyle(color: Colors.black87, fontSize: 13),
           children: [
             TextSpan(
               text: '$label: ',
               style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF2c3e50),
-              ),
+                  fontWeight: FontWeight.bold, color: Color(0xFF2c3e50)),
             ),
             TextSpan(text: (value ?? '---').toString()),
           ],
@@ -302,21 +354,41 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
     );
   }
 
-  // --- GERAR PDF DO RANKING GERAL ---
   Future<void> _exportarPdfRanking(List<Map<String, dynamic>> ranking) async {
     final pdf = pw.Document();
 
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(30),
+        footer: (pw.Context context) {
+          return pw.Column(
+            mainAxisSize: pw.MainAxisSize.min,
+            children: [
+              pw.Divider(color: PdfColors.grey300),
+              pw.SizedBox(height: 5),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'Relatório gerado pelo Sistema de Ocorrências semafóricas - SOS em ${DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now())}',
+                    style: const pw.TextStyle(
+                        fontSize: 10, color: PdfColors.grey600),
+                  ),
+                  pw.Text(
+                    'Página ${context.pageNumber} de ${context.pagesCount}',
+                    style: const pw.TextStyle(
+                        fontSize: 10, color: PdfColors.grey600),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
         build: (context) => [
-          pw.Text(
-            'Relatório de Recorrências (Top 10)',
-            style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
-          ),
-          pw.Text(
-            'Gerado em: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}',
-          ),
+          pw.Text('Relatório de Recorrências (Top 10)',
+              style: pw.TextStyle(
+                  fontSize: 20, fontWeight: pw.FontWeight.bold)),
           pw.SizedBox(height: 15),
           pw.TableHelper.fromTextArray(
             headers: [
@@ -324,7 +396,7 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
               'Semáforo',
               'Endereço',
               'Empresa',
-              'Total Ocorrências',
+              'Total Ocorrências'
             ],
             data: ranking.asMap().entries.map((entry) {
               int pos = entry.key + 1;
@@ -338,12 +410,9 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
               ];
             }).toList(),
             headerStyle: pw.TextStyle(
-              fontWeight: pw.FontWeight.bold,
-              color: PdfColors.white,
-            ),
-            headerDecoration: const pw.BoxDecoration(
-              color: PdfColors.blueGrey800,
-            ),
+                fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+            headerDecoration:
+                const pw.BoxDecoration(color: PdfColors.blueGrey800),
             cellStyle: const pw.TextStyle(fontSize: 9),
             cellAlignment: pw.Alignment.center,
           ),
@@ -352,9 +421,150 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
     );
 
     await Printing.layoutPdf(
-      onLayout: (format) async => pdf.save(),
-      name: 'Relatorio_Recorrencias.pdf',
+        onLayout: (format) async => pdf.save(),
+        name: 'Relatorio_Recorrencias.pdf');
+  }
+
+  Future<void> _exportarPdfHistoricoSemaforo(
+      String semaforo, List<QueryDocumentSnapshot> historicoDocs) async {
+    final pdf = pw.Document();
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4.landscape,
+        margin: const pw.EdgeInsets.all(30),
+        footer: (pw.Context context) {
+          return pw.Column(
+            mainAxisSize: pw.MainAxisSize.min,
+            children: [
+              pw.Divider(color: PdfColors.grey300),
+              pw.SizedBox(height: 5),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'Relatório gerado pelo Sistema de Ocorrências semafóricas - SOS em ${DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now())}',
+                    style: const pw.TextStyle(
+                        fontSize: 10, color: PdfColors.grey600),
+                  ),
+                  pw.Text(
+                    'Página ${context.pageNumber} de ${context.pagesCount}',
+                    style: const pw.TextStyle(
+                        fontSize: 10, color: PdfColors.grey600),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+        build: (context) => [
+          pw.Text('Histórico de Ocorrências - Semáforo $semaforo',
+              style: pw.TextStyle(
+                  fontSize: 20, fontWeight: pw.FontWeight.bold)),
+          pw.Text('Total de Ocorrências: ${historicoDocs.length}'),
+          pw.SizedBox(height: 15),
+          pw.TableHelper.fromTextArray(
+            headers: [
+              'Nº Ocorrência',
+              'Abertura',
+              'Finalização',
+              'Status',
+              'Equipe',
+              'Falha Relatada',
+              'Falha Encontrada'
+            ],
+            data: historicoDocs.map((doc) {
+              var d = doc.data() as Map<String, dynamic>;
+              return [
+                (d['numero_da_ocorrencia'] ?? doc.id).toString(),
+                _formatarDataHoraCompleta(d['data_de_abertura']),
+                _formatarDataHoraCompleta(d['data_de_finalizacao']),
+                (d['status'] ?? '-').toString().toUpperCase(),
+                (d['equipe_atrelada'] ?? d['equipe_responsavel'] ?? '-')
+                    .toString(),
+                (d['tipo_da_falha'] ?? '-').toString(),
+                (d['falha_aparente_final'] ?? '-').toString(),
+              ];
+            }).toList(),
+            headerStyle: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+            headerDecoration:
+                const pw.BoxDecoration(color: PdfColors.blueGrey800),
+            cellStyle: const pw.TextStyle(fontSize: 8),
+            cellAlignment: pw.Alignment.center,
+          ),
+        ],
+      ),
     );
+
+    await Printing.layoutPdf(
+        onLayout: (format) async => pdf.save(),
+        name: 'Historico_Semaforo_$semaforo.pdf');
+  }
+
+  void _baixarExcel(List<Map<String, dynamic>> ranking) async {
+    var excel = Excel.createExcel();
+    Sheet sheetObject = excel['Top 10'];
+    excel.setDefaultSheet('Top 10');
+
+    sheetObject
+        .appendRow([TextCellValue("Relatório de Recorrências - Top 10")]);
+    sheetObject.appendRow([TextCellValue("Filtros Aplicados:")]);
+    sheetObject.appendRow([
+      TextCellValue("Empresa:"),
+      TextCellValue(_filtroEmpresa.isEmpty ? 'Todas' : _filtroEmpresa)
+    ]);
+    sheetObject.appendRow([
+      TextCellValue("Falha:"),
+      TextCellValue(_filtroFalha.isEmpty ? 'Todas' : _filtroFalha)
+    ]);
+
+    String dtIni = _dataInicio != null
+        ? DateFormat('dd/MM/yyyy').format(_dataInicio!)
+        : '-';
+    String dtFim =
+        _dataFim != null ? DateFormat('dd/MM/yyyy').format(_dataFim!) : '-';
+    sheetObject.appendRow([
+      TextCellValue("Período:"),
+      TextCellValue("$dtIni até $dtFim")
+    ]);
+
+    sheetObject.appendRow([TextCellValue("")]);
+
+    sheetObject.appendRow([
+      TextCellValue("Posição"),
+      TextCellValue("Semáforo"),
+      TextCellValue("Endereço"),
+      TextCellValue("Empresa"),
+      TextCellValue("Total Ocorrências")
+    ]);
+
+    int pos = 1;
+    for (var d in ranking) {
+      sheetObject.appendRow([
+        TextCellValue("${pos}º"),
+        TextCellValue(d['semaforo'].toString()),
+        TextCellValue(d['endereco'].toString()),
+        TextCellValue(d['empresa'].toString()),
+        TextCellValue(d['total'].toString()),
+      ]);
+      pos++;
+    }
+
+    var fileBytes = excel.encode();
+    if (fileBytes != null) {
+      final xfile = XFile.fromData(
+          Uint8List.fromList(fileBytes),
+          mimeType:
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          name: 'Relatorio_Recorrencias.xlsx');
+      await Share.shareXFiles([xfile], text: 'Relatório de Recorrências Top 10');
+
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Planilha baixada com sucesso!'),
+            backgroundColor: Colors.green));
+    }
   }
 
   @override
@@ -364,7 +574,8 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
       appBar: AppBar(
         title: const Text(
           'Relatório de Recorrências',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style:
+              TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.black.withValues(alpha: 0.8),
         elevation: 0,
@@ -401,42 +612,37 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                       runSpacing: 15,
                       crossAxisAlignment: WrapCrossAlignment.end,
                       children: [
-                        _buildDateFilter(
-                          'De (Abertura):',
-                          _dataInicio,
-                          (d) => setState(() => _dataInicio = d),
-                        ),
-                        _buildDateFilter(
-                          'Até (Abertura):',
-                          _dataFim,
-                          (d) => setState(() => _dataFim = d),
-                        ),
-
                         _buildDropdown(
-                          'Empresa:',
-                          _filtroEmpresa,
-                          ['Todas', ..._empresas],
-                          (v) => setState(
-                            () => _filtroEmpresa = v == 'Todas' ? '' : v!,
-                          ),
-                        ),
+                            'Empresa:',
+                            _filtroEmpresa,
+                            ['Todas', ..._empresas], (v) {
+                          setState(
+                              () => _filtroEmpresa = v == 'Todas' ? '' : v!);
+                          _gerarRankingAsync();
+                        }),
                         _buildDropdown(
-                          'Falha Relatada:',
-                          _filtroFalha,
-                          ['Todas', ..._falhas],
-                          (v) => setState(
-                            () => _filtroFalha = v == 'Todas' ? '' : v!,
-                          ),
-                        ),
+                            'Falha Relatada:',
+                            _filtroFalha,
+                            ['Todas', ..._falhas], (v) {
+                          setState(
+                              () => _filtroFalha = v == 'Todas' ? '' : v!);
+                          _gerarRankingAsync();
+                        }),
+                        _buildDateFilter('De (Abertura):', _dataInicio, (d) {
+                          setState(() => _dataInicio = d);
+                          _gerarRankingAsync();
+                        }),
+                        _buildDateFilter('Até (Abertura):', _dataFim, (d) {
+                          setState(() => _dataFim = d);
+                          _gerarRankingAsync();
+                        }),
 
                         OutlinedButton(
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.white,
                             side: const BorderSide(color: Colors.white54),
                             padding: const EdgeInsets.symmetric(
-                              vertical: 14,
-                              horizontal: 16,
-                            ),
+                                vertical: 14, horizontal: 16),
                           ),
                           onPressed: _limparFiltros,
                           child: const Text('Limpar Filtros'),
@@ -460,254 +666,313 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                         borderRadius: BorderRadius.circular(10),
                       ),
                       margin: const EdgeInsets.only(
-                        bottom: 24,
-                        left: 16,
-                        right: 16,
-                      ),
-                      child: StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance
-                            .collection('ocorrencias')
-                            .snapshots(),
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting)
-                            return const Center(
-                              child: CircularProgressIndicator(),
-                            );
-                          if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
-                            return const Center(
-                              child: Text('Nenhum dado encontrado.'),
-                            );
-
-                          // Processar Ranking
-                          List<Map<String, dynamic>> ranking = _gerarRanking(
-                            snapshot.data!.docs,
-                          );
-
-                          if (ranking.isEmpty)
-                            return const Center(
-                              child: Text(
-                                'Nenhum resultado para os filtros atuais.',
-                              ),
-                            );
-
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey.shade100,
-                                  borderRadius: const BorderRadius.vertical(
-                                    top: Radius.circular(10),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
+                          bottom: 24, left: 16, right: 16),
+                      child: _isLoading
+                          ? const Center(child: CircularProgressIndicator())
+                          : _rankingGerado.isEmpty
+                              ? const Center(
+                                  child: Text(
+                                      'Nenhum resultado para os filtros atuais.'))
+                              : Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
                                   children: [
-                                    const Text(
-                                      'TOP 10 MAIS RECORRENTES',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.blue,
-                                        fontSize: 16,
+                                    Container(
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color: Colors.grey.shade100,
+                                        borderRadius:
+                                            const BorderRadius.vertical(
+                                                top: Radius.circular(10)),
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          const Text(
+                                            'TOP 10 MAIS RECORRENTES',
+                                            style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.blueGrey,
+                                                fontSize: 16),
+                                          ),
+                                          Row(
+                                            children: [
+                                              ElevatedButton.icon(
+                                                style: ElevatedButton.styleFrom(
+                                                    backgroundColor:
+                                                        Colors.green.shade600,
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                        horizontal: 12,
+                                                        vertical: 8)),
+                                                icon: const Icon(Icons.download,
+                                                    color: Colors.white,
+                                                    size: 16),
+                                                label: const Text(
+                                                    'Baixar Planilha (XLSX)',
+                                                    style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 12,
+                                                        fontWeight:
+                                                            FontWeight.bold)),
+                                                onPressed: () =>
+                                                    _baixarExcel(_rankingGerado),
+                                              ),
+                                              const SizedBox(width: 10),
+                                              ElevatedButton.icon(
+                                                style: ElevatedButton.styleFrom(
+                                                    backgroundColor:
+                                                        Colors.redAccent,
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                        horizontal: 12,
+                                                        vertical: 8)),
+                                                icon: const Icon(
+                                                    Icons.picture_as_pdf,
+                                                    color: Colors.white,
+                                                    size: 16),
+                                                label: const Text(
+                                                    'Baixar PDF Global',
+                                                    style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 12,
+                                                        fontWeight:
+                                                            FontWeight.bold)),
+                                                onPressed: () =>
+                                                    _exportarPdfRanking(
+                                                        _rankingGerado),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                    ElevatedButton.icon(
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.redAccent,
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 8,
-                                        ),
+                                    Expanded(
+                                      child: LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          return SingleChildScrollView(
+                                            scrollDirection: Axis.vertical,
+                                            child: SingleChildScrollView(
+                                              scrollDirection: Axis.horizontal,
+                                              child: ConstrainedBox(
+                                                constraints: BoxConstraints(
+                                                    minWidth:
+                                                        constraints.maxWidth),
+                                                child: DataTable(
+                                                  headingRowColor:
+                                                      WidgetStateProperty.all(
+                                                          const Color(
+                                                              0xFFeceff1)),
+                                                  dataRowMinHeight: 60,
+                                                  dataRowMaxHeight: 70,
+                                                  columns: const [
+                                                    DataColumn(
+                                                        label: Expanded(
+                                                            child: Center(
+                                                                child: Text(
+                                                                    'Posição',
+                                                                    textAlign:
+                                                                        TextAlign
+                                                                            .center,
+                                                                    style: TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight.bold))))),
+                                                    DataColumn(
+                                                        label: Expanded(
+                                                            child: Center(
+                                                                child: Text(
+                                                                    'Semáforo',
+                                                                    textAlign:
+                                                                        TextAlign
+                                                                            .center,
+                                                                    style: TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight.bold))))),
+                                                    DataColumn(
+                                                        label: Expanded(
+                                                            child: Center(
+                                                                child: Text(
+                                                                    'Endereço',
+                                                                    textAlign:
+                                                                        TextAlign
+                                                                            .center,
+                                                                    style: TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight.bold))))),
+                                                    DataColumn(
+                                                        label: Expanded(
+                                                            child: Center(
+                                                                child: Text(
+                                                                    'Empresa',
+                                                                    textAlign:
+                                                                        TextAlign
+                                                                            .center,
+                                                                    style: TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight.bold))))),
+                                                    DataColumn(
+                                                        label: Expanded(
+                                                            child: Center(
+                                                                child: Text(
+                                                                    'Total Ocorrências',
+                                                                    textAlign:
+                                                                        TextAlign
+                                                                            .center,
+                                                                    style: TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight.bold))))),
+                                                    DataColumn(
+                                                        label: Expanded(
+                                                            child: Center(
+                                                                child: Text(
+                                                                    'Histórico',
+                                                                    textAlign:
+                                                                        TextAlign
+                                                                            .center,
+                                                                    style: TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight.bold))))),
+                                                  ],
+                                                  rows: List.generate(
+                                                      _rankingGerado.length,
+                                                      (idx) {
+                                                    var item =
+                                                        _rankingGerado[idx];
+
+                                                    Color corPosicao =
+                                                        Colors.black87;
+                                                    double fontPosicao = 14;
+                                                    if (idx == 0) {
+                                                      corPosicao = const Color(
+                                                          0xFFD4AF37); // Ouro
+                                                      fontPosicao = 18;
+                                                    } else if (idx == 1) {
+                                                      corPosicao = const Color(
+                                                          0xFFC0C0C0); // Prata
+                                                      fontPosicao = 16;
+                                                    } else if (idx == 2) {
+                                                      corPosicao = const Color(
+                                                          0xFFCD7F32); // Bronze
+                                                      fontPosicao = 16;
+                                                    }
+
+                                                    return DataRow(
+                                                      cells: [
+                                                        DataCell(Center(
+                                                            child: Text(
+                                                                '${idx + 1}º',
+                                                                style: TextStyle(
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .bold,
+                                                                    fontSize:
+                                                                        fontPosicao,
+                                                                    color:
+                                                                        corPosicao)))),
+                                                        DataCell(Center(
+                                                            child: Text(
+                                                                item['semaforo']
+                                                                    .toString(),
+                                                                style: const TextStyle(
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .bold,
+                                                                    color: Colors
+                                                                        .blueGrey)))),
+                                                        DataCell(
+                                                          Center(
+                                                            child: SizedBox(
+                                                              width: 300,
+                                                              child: Text(
+                                                                  item['endereco']
+                                                                      .toString(),
+                                                                  textAlign:
+                                                                      TextAlign
+                                                                          .center,
+                                                                  maxLines: 2,
+                                                                  overflow:
+                                                                      TextOverflow
+                                                                          .ellipsis),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                        DataCell(Center(
+                                                            child: Text(
+                                                                item['empresa']
+                                                                    .toString(),
+                                                                textAlign:
+                                                                    TextAlign
+                                                                        .center))),
+                                                        DataCell(
+                                                          Center(
+                                                            child: Container(
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .symmetric(
+                                                                      horizontal:
+                                                                          12,
+                                                                      vertical:
+                                                                          6),
+                                                              decoration:
+                                                                  BoxDecoration(
+                                                                color: Colors
+                                                                    .red
+                                                                    .shade50,
+                                                                borderRadius:
+                                                                    BorderRadius
+                                                                        .circular(
+                                                                            4),
+                                                                border: Border.all(
+                                                                    color: Colors
+                                                                        .red
+                                                                        .shade200),
+                                                              ),
+                                                              child: Text(
+                                                                  '${item['total']}',
+                                                                  style: TextStyle(
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .bold,
+                                                                      fontSize:
+                                                                          16,
+                                                                      color: Colors
+                                                                          .red
+                                                                          .shade800)),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                        DataCell(
+                                                          Center(
+                                                            child: IconButton(
+                                                              icon: const Icon(
+                                                                  Icons
+                                                                      .list_alt,
+                                                                  color: Colors
+                                                                      .blueGrey,
+                                                                  size: 28),
+                                                              tooltip:
+                                                                  'Ver Histórico Completo',
+                                                              onPressed: () =>
+                                                                  _abrirHistorico(
+                                                                      item['semaforo']
+                                                                          .toString(),
+                                                                      _todasOcorrenciasCache),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    );
+                                                  }),
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        },
                                       ),
-                                      icon: const Icon(
-                                        Icons.picture_as_pdf,
-                                        color: Colors.white,
-                                        size: 16,
-                                      ),
-                                      label: const Text(
-                                        'PDF',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                      onPressed: () =>
-                                          _exportarPdfRanking(ranking),
                                     ),
                                   ],
                                 ),
-                              ),
-                              Expanded(
-                                child: SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  child: SingleChildScrollView(
-                                    child: DataTable(
-                                      headingRowColor: WidgetStateProperty.all(
-                                        const Color(0xFFeceff1),
-                                      ),
-                                      dataRowMinHeight: 60,
-                                      dataRowMaxHeight: 70,
-                                      columns: const [
-                                        DataColumn(
-                                          label: Text(
-                                            'Posição',
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                        DataColumn(
-                                          label: Text(
-                                            'Semáforo',
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                        DataColumn(
-                                          label: Text(
-                                            'Endereço',
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                        DataColumn(
-                                          label: Text(
-                                            'Empresa',
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                        DataColumn(
-                                          label: Text(
-                                            'Total Ocorrências',
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                        DataColumn(
-                                          label: Text(
-                                            'Histórico',
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                      rows: ranking.asMap().entries.map((
-                                        entry,
-                                      ) {
-                                        int idx = entry.key;
-                                        var item = entry.value;
-
-                                        // Cores do Pódio
-                                        Color corPosicao = Colors.black87;
-                                        double fontPosicao = 14;
-                                        if (idx == 0) {
-                                          corPosicao = const Color(0xFFD4AF37);
-                                          fontPosicao = 18;
-                                        } // Ouro
-                                        else if (idx == 1) {
-                                          corPosicao = const Color(0xFFC0C0C0);
-                                          fontPosicao = 16;
-                                        } // Prata
-                                        else if (idx == 2) {
-                                          corPosicao = const Color(0xFFCD7F32);
-                                          fontPosicao = 16;
-                                        } // Bronze
-
-                                        return DataRow(
-                                          cells: [
-                                            DataCell(
-                                              Text(
-                                                '${idx + 1}º',
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: fontPosicao,
-                                                  color: corPosicao,
-                                                ),
-                                              ),
-                                            ),
-                                            DataCell(
-                                              Text(
-                                                item['semaforo'],
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Colors.blue,
-                                                ),
-                                              ),
-                                            ),
-                                            DataCell(
-                                              SizedBox(
-                                                width: 250,
-                                                child: Text(
-                                                  item['endereco'],
-                                                  maxLines: 2,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                ),
-                                              ),
-                                            ),
-                                            DataCell(Text(item['empresa'])),
-                                            DataCell(
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 12,
-                                                      vertical: 6,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.green.shade50,
-                                                  borderRadius:
-                                                      BorderRadius.circular(4),
-                                                  border: Border.all(
-                                                    color:
-                                                        Colors.green.shade200,
-                                                  ),
-                                                ),
-                                                child: Text(
-                                                  '${item['total']}',
-                                                  style: const TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 16,
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                            DataCell(
-                                              IconButton(
-                                                icon: const Icon(
-                                                  Icons.list_alt,
-                                                  color: Colors.blueGrey,
-                                                  size: 28,
-                                                ),
-                                                tooltip:
-                                                    'Ver Histórico Completo',
-                                                onPressed: () =>
-                                                    _abrirHistorico(
-                                                      item['semaforo'],
-                                                      snapshot.data!.docs,
-                                                    ),
-                                              ),
-                                            ),
-                                          ],
-                                        );
-                                      }).toList(),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
                     ),
                   ),
                 ),
@@ -719,78 +984,77 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
     );
   }
 
-  // --- COMPONENTES DOS FILTROS ---
+  // --- WIDGETS AUXILIARES COM LARGURA PADRONIZADA (180px) ---
+
+  // CORREÇÃO: void Function(DateTime) no lugar de Function(DateTime)
   Widget _buildDateFilter(
-    String label,
-    DateTime? val,
-    Function(DateTime) onPicked,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white70, fontSize: 12),
-        ),
-        const SizedBox(height: 4),
-        InkWell(
-          onTap: () async {
-            DateTime? picked = await showDatePicker(
-              context: context,
-              initialDate: val ?? DateTime.now(),
-              firstDate: DateTime(2020),
-              lastDate: DateTime.now(),
-            );
-            if (picked != null) onPicked(picked);
-          },
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              val == null ? 'dd/mm/aaaa' : DateFormat('dd/MM/yyyy').format(val),
-              style: const TextStyle(color: Colors.black87),
+      String label, DateTime? val, void Function(DateTime) onPicked) {
+    return SizedBox(
+      width: 180,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          const SizedBox(height: 4),
+          InkWell(
+            onTap: () async {
+              DateTime? picked = await showDatePicker(
+                  context: context,
+                  initialDate: val ?? DateTime.now(),
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime.now());
+              if (picked != null) onPicked(picked);
+            },
+            child: Container(
+              height: 42,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              alignment: Alignment.centerLeft,
+              decoration: BoxDecoration(
+                  color: Colors.white, borderRadius: BorderRadius.circular(4)),
+              child: Text(
+                  val == null
+                      ? 'dd/mm/aaaa'
+                      : DateFormat('dd/MM/yyyy').format(val),
+                  style: const TextStyle(color: Colors.black87)),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  Widget _buildDropdown(
-    String label,
-    String value,
-    List<String> items,
-    Function(String?) onChanged,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white70, fontSize: 12),
-        ),
-        const SizedBox(height: 4),
-        Container(
-          height: 42,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: value.isEmpty ? items.first : value,
-              items: items
-                  .map((i) => DropdownMenuItem(value: i, child: Text(i)))
-                  .toList(),
-              onChanged: onChanged,
+  // CORREÇÃO: void Function(String?) no lugar de Function(String?)
+  Widget _buildDropdown(String label, String value, List<String> items,
+      void Function(String?) onChanged) {
+    return SizedBox(
+      width: 180,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          const SizedBox(height: 4),
+          Container(
+            height: 42,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+                color: Colors.white, borderRadius: BorderRadius.circular(4)),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                isExpanded: true,
+                value: value.isEmpty ? items.first : value,
+                items: items
+                    .map((i) => DropdownMenuItem(
+                        value: i,
+                        child: Text(i, overflow: TextOverflow.ellipsis)))
+                    .toList(),
+                onChanged: onChanged,
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

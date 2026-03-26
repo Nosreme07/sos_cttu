@@ -36,6 +36,9 @@ class _ListaIntegrantesState extends State<ListaIntegrantes> with SingleTickerPr
   late TabController _tabController;
   final TextEditingController _buscaController = TextEditingController();
   String _termoBusca = '';
+  
+  // Lista de empresas carregadas do banco para o Autocompletar
+  List<String> _empresasOptions = [];
 
   @override
   void initState() {
@@ -44,6 +47,7 @@ class _ListaIntegrantesState extends State<ListaIntegrantes> with SingleTickerPr
     _tabController.addListener(() {
       setState(() {}); 
     });
+    _carregarEmpresas();
   }
 
   @override
@@ -51,6 +55,36 @@ class _ListaIntegrantesState extends State<ListaIntegrantes> with SingleTickerPr
     _tabController.dispose();
     _buscaController.dispose();
     super.dispose();
+  }
+
+  // --- CARREGA TODAS AS EMPRESAS DO BANCO DE DADOS ---
+  Future<void> _carregarEmpresas() async {
+    try {
+      final resEmpresas = await FirebaseFirestore.instance.collection('empresas').get();
+      final resInt = await FirebaseFirestore.instance.collection('integrantes').get();
+
+      Set<String> empSet = {};
+      
+      // Busca do cadastro oficial de empresas (se existir)
+      for (var doc in resEmpresas.docs) {
+        String emp = (doc.data()['nome'] ?? doc.data()['empresa'] ?? doc.id).toString().toUpperCase();
+        if (emp.isNotEmpty) empSet.add(emp);
+      }
+      
+      // Busca também das empresas que já estão nos integrantes (Garante que nenhuma fique de fora)
+      for (var doc in resInt.docs) {
+        String emp = (doc.data()['empresa'] ?? '').toString().toUpperCase();
+        if (emp.isNotEmpty) empSet.add(emp);
+      }
+
+      if (mounted) {
+        setState(() {
+          _empresasOptions = empSet.toList()..sort();
+        });
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar empresas: $e');
+    }
   }
 
   // --- Função para Excluir Integrante ---
@@ -86,7 +120,15 @@ class _ListaIntegrantesState extends State<ListaIntegrantes> with SingleTickerPr
     final formKey = GlobalKey<FormState>();
     final nomeController = TextEditingController(text: dadosAtuais?['nomeCompleto'] ?? '');
     final contatoController = TextEditingController(text: dadosAtuais?['contato'] ?? '');
-    final empresaController = TextEditingController(text: dadosAtuais?['empresa'] ?? '');
+    
+    String empresaAtual = dadosAtuais?['empresa'] ?? '';
+    final empresaController = TextEditingController(text: empresaAtual);
+    
+    // Garante que a empresa atual do integrante apareça na lista de opções (se ele for de uma empresa que foi apagada)
+    if (empresaAtual.isNotEmpty && !_empresasOptions.contains(empresaAtual)) {
+      _empresasOptions.add(empresaAtual);
+    }
+
     String? funcaoSelecionada = dadosAtuais?['funcao'];
     
     bool estaCarregando = false;
@@ -123,17 +165,43 @@ class _ListaIntegrantesState extends State<ListaIntegrantes> with SingleTickerPr
 
                         TextFormField(
                           controller: nomeController,
+                          textCapitalization: TextCapitalization.characters,
+                          inputFormatters: [
+                            TextInputFormatter.withFunction((oldValue, newValue) {
+                              return TextEditingValue(
+                                text: newValue.text.toUpperCase(),
+                                selection: newValue.selection,
+                              );
+                            })
+                          ],
                           decoration: const InputDecoration(labelText: 'Nome Completo *', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person)),
                           validator: (value) => value == null || value.trim().isEmpty ? 'Obrigatório' : null,
                         ),
                         const SizedBox(height: 12),
 
                         DropdownButtonFormField<String>(
-                          decoration: const InputDecoration(labelText: 'Função', border: OutlineInputBorder(), prefixIcon: Icon(Icons.work)),
+                          decoration: const InputDecoration(labelText: 'Função *', border: OutlineInputBorder(), prefixIcon: Icon(Icons.work)),
                           value: funcaoSelecionada,
                           isExpanded: true, 
                           items: _funcoes.map((f) => DropdownMenuItem(value: f, child: Text(f, overflow: TextOverflow.ellipsis))).toList(),
                           onChanged: (val) => setStateModal(() => funcaoSelecionada = val),
+                          validator: (value) => value == null || value.isEmpty ? 'Selecione uma função' : null,
+                        ),
+                        const SizedBox(height: 12),
+
+                        // NOVO CAMPO DE EMPRESA COM LISTAGEM E AUTOCOMPLETAR
+                        DropdownMenu<String>(
+                          expandedInsets: EdgeInsets.zero,
+                          controller: empresaController,
+                          enableFilter: true,
+                          enableSearch: true,
+                          label: const Text('Empresa *'),
+                          leadingIcon: const Icon(Icons.factory),
+                          inputDecorationTheme: const InputDecorationTheme(
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                          ),
+                          dropdownMenuEntries: _empresasOptions.map((e) => DropdownMenuEntry(value: e, label: e)).toList(),
                         ),
                         const SizedBox(height: 12),
 
@@ -146,12 +214,6 @@ class _ListaIntegrantesState extends State<ListaIntegrantes> with SingleTickerPr
                             TelefoneInputFormatter(), 
                           ],
                         ),
-                        const SizedBox(height: 12),
-
-                        TextFormField(
-                          controller: empresaController,
-                          decoration: const InputDecoration(labelText: 'Empresa', border: OutlineInputBorder(), prefixIcon: Icon(Icons.factory)),
-                        ),
                         const SizedBox(height: 24),
 
                         ElevatedButton(
@@ -160,6 +222,12 @@ class _ListaIntegrantesState extends State<ListaIntegrantes> with SingleTickerPr
                             padding: const EdgeInsets.symmetric(vertical: 16),
                           ),
                           onPressed: estaCarregando ? null : () async {
+                            // Validação manual da Empresa já que o DropdownMenu não usa o Validator do Form
+                            if (empresaController.text.trim().isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('A Empresa é obrigatória!'), backgroundColor: Colors.red));
+                              return;
+                            }
+
                             if (formKey.currentState!.validate()) {
                               setStateModal(() => estaCarregando = true);
 
@@ -182,6 +250,10 @@ class _ListaIntegrantesState extends State<ListaIntegrantes> with SingleTickerPr
                                   if (mounted) Navigator.pop(context);
                                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Criado com sucesso!'), backgroundColor: Colors.green));
                                 }
+                                
+                                // Recarrega a lista de empresas (caso o usuário tenha digitado uma empresa nova)
+                                _carregarEmpresas();
+
                               } catch (e) {
                                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red));
                               } finally {
@@ -191,7 +263,7 @@ class _ListaIntegrantesState extends State<ListaIntegrantes> with SingleTickerPr
                           },
                           child: estaCarregando 
                               ? const CircularProgressIndicator(color: Colors.white) 
-                              : Text(isEditando ? 'ATUALIZAR' : 'CADASTRAR', style: const TextStyle(color: Colors.white)),
+                              : Text(isEditando ? 'ATUALIZAR' : 'CADASTRAR', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         ),
                       ],
                     ),
@@ -454,7 +526,7 @@ class _ListaIntegrantesState extends State<ListaIntegrantes> with SingleTickerPr
                                       color: Colors.white.withValues(alpha: 0.95),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                       child: ListTile(
-                                        dense: true, // CARDS MENORES
+                                        dense: true, 
                                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                                         leading: CircleAvatar(
                                           radius: 20,
@@ -504,7 +576,6 @@ class _ListaIntegrantesState extends State<ListaIntegrantes> with SingleTickerPr
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                // Grid dinâmico que lê todas as funções
                                 GridView.builder(
                                   shrinkWrap: true,
                                   physics: const NeverScrollableScrollPhysics(), 

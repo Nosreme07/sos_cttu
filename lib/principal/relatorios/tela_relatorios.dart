@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:sos_cttu/principal/relatorios/relatorio_ocorrencias.dart';
 
+// Importações exclusivas (sem duplicatas)
 import 'relatorio_ocorrencias.dart';
-import 'relatorio_recorrencias.dart';
 import 'relatorio_equipes.dart';
-import 'relatorio_semaforos.dart';
+import 'relatorio_recorrencias.dart';
+// import 'relatorio_semaforos.dart';
 
 import '../../widgets/menu_usuario.dart';
 
@@ -55,9 +55,8 @@ class TelaRelatorios extends StatelessWidget {
                     _buildCardWithImage(
                       context,
                       'Ocorrências',
-                      'assets/images/relatorio_ocorrencias.png', // Ícone corrigido
+                      'assets/images/relatorio_ocorrencias.png', 
                       () {
-                        // Navega para a tela que fizemos no passo anterior!
                         Navigator.push(
                           context,
                           MaterialPageRoute(
@@ -72,16 +71,15 @@ class TelaRelatorios extends StatelessWidget {
                     _buildCardWithImage(
                       context,
                       'Equipes',
-                      'assets/images/relatorio_equipes.png', // Ícone corrigido
+                      'assets/images/relatorio_equipes.png', 
                       () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Página de Relatório de Equipes em construção...',
-                            ),
-                          ),
+                        // Navegação ATIVADA para a tela de Equipes
+                        Navigator.push(
+                          context, 
+                          MaterialPageRoute(
+                            builder: (context) => const TelaRelatorioEquipes()
+                          )
                         );
-                        // Navigator.push(context, MaterialPageRoute(builder: (context) => const RelatorioEquipes()));
                       },
                     ),
 
@@ -89,7 +87,7 @@ class TelaRelatorios extends StatelessWidget {
                     _buildCardWithImage(
                       context,
                       'Recorrências',
-                      'assets/images/relatorio_recorrencias.png', // Ícone corrigido
+                      'assets/images/relatorio_recorrencias.png', 
                       () {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
@@ -98,7 +96,7 @@ class TelaRelatorios extends StatelessWidget {
                             ),
                           ),
                         );
-                        // Navigator.push(context, MaterialPageRoute(builder: (context) => const RelatorioRecorrencias()));
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => const TelaRelatorioRecorrencias()));
                       },
                     ),
 
@@ -106,7 +104,7 @@ class TelaRelatorios extends StatelessWidget {
                     _buildCardWithImage(
                       context,
                       'Semáforos',
-                      'assets/images/relatorio_semaforos.png', // Ícone corrigido
+                      'assets/images/relatorio_semaforos.png', 
                       () {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
