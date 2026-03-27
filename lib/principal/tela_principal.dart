@@ -108,7 +108,7 @@ class TelaPrincipal extends StatelessWidget {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => const TelaRelatorioSemaforos(), // <-- Nome da classe corrigido aqui
+                            builder: (context) => const TelaRelatorios(), // <-- Nome da classe corrigido aqui
                           ),
                         );
                       },

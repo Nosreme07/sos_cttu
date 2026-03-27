@@ -1,9 +1,9 @@
 import 'dart:convert';
-import 'dart:typed_data'; // <-- Adicionado para o Excel (Uint8List)
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart'; // <-- Adicionado para data e hora no PDF
+import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -264,7 +264,6 @@ class _TelaRelatorioSemaforosState extends State<TelaRelatorioSemaforos> {
       for (var doc in snapshot.docs) {
         var d = doc.data();
         
-        // Formatar número para 3 dígitos com zero à esquerda
         String rawNum = (d['id'] ?? d['numero'] ?? '').toString().trim();
         int? numVal = int.tryParse(rawNum);
         String numeroFormatado = numVal != null ? numVal.toString().padLeft(3, '0') : rawNum.padLeft(3, '0');
@@ -321,11 +320,32 @@ class _TelaRelatorioSemaforosState extends State<TelaRelatorioSemaforos> {
       for (var f in _filtrosBooleanos) {
         f.ativo = false;
       }
-      _paginaAtual = 0; // Volta para a página 1
+      _paginaAtual = 0; 
     });
   }
 
-  // --- LÓGICA DE FILTRAGEM ---
+  // Monta uma string de resumo dos filtros aplicados para os PDFs e Excel
+  String _construirResumoFiltros() {
+    List<String> ativos = [];
+    if (_fNumero.text.isNotEmpty) ativos.add('Nº: ${_fNumero.text}');
+    if (_fEndereco.text.isNotEmpty) ativos.add('Endereço: ${_fEndereco.text}');
+    if (_fBairro.text.isNotEmpty) ativos.add('Bairro: ${_fBairro.text}');
+    if (_fEmpresa.text.isNotEmpty) ativos.add('Empresa: ${_fEmpresa.text}');
+    if (_fRota.text.isNotEmpty) ativos.add('Rota: ${_fRota.text}');
+    if (_fData.text.isNotEmpty) ativos.add('Ano: ${_fData.text}');
+    if (_fControlador.text.isNotEmpty) ativos.add('Controlador: ${_fControlador.text}');
+    if (_fModo.text.isNotEmpty) ativos.add('Modo: ${_fModo.text}');
+    
+    var boolsAtivos = _filtrosBooleanos.where((f) => f.ativo).map((f) => f.label);
+    if (boolsAtivos.isNotEmpty) ativos.add('Comp: ${boolsAtivos.join(', ')}');
+
+    return ativos.isEmpty ? 'Nenhum filtro aplicado (Todos)' : ativos.join(' | ');
+  }
+
+  String _obterDataHoraFormatada() {
+    return DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now());
+  }
+
   bool _passouNoFiltro(Map<String, dynamic> item) {
     bool matchString(String? valDb, String term) {
       if (term.isEmpty) return true;
@@ -343,29 +363,20 @@ class _TelaRelatorioSemaforosState extends State<TelaRelatorioSemaforos> {
     if (!matchString(item['conta_contrato']?.toString(), _fConta.text)) return false;
     if (!matchString(item['numero_do_medidor']?.toString(), _fMedidor.text)) return false;
 
-    // Filtros Booleanos
     for (var filtro in _filtrosBooleanos) {
       if (filtro.ativo) {
         var valor = item[filtro.dbField];
         bool isSim = false;
-        if (valor == true ||
-            valor == 'Sim' ||
-            valor == 'SIM' ||
-            valor == 's' ||
-            valor == 'true' ||
-            valor == '1') {
+        if (valor == true || valor == 'Sim' || valor == 'SIM' || valor == 's' || valor == 'true' || valor == '1') {
           isSim = true;
         } else if (valor is num && valor > 0) {
           isSim = true;
-        } else if (valor is String &&
-            num.tryParse(valor) != null &&
-            num.parse(valor) > 0) {
+        } else if (valor is String && num.tryParse(valor) != null && num.parse(valor) > 0) {
           isSim = true;
         }
         if (!isSim) return false;
       }
     }
-
     return true;
   }
 
@@ -375,42 +386,57 @@ class _TelaRelatorioSemaforosState extends State<TelaRelatorioSemaforos> {
     Sheet sheetObject = excel['Semáforos'];
     excel.setDefaultSheet('Semáforos');
 
+    String dataHora = _obterDataHoraFormatada();
+
     sheetObject.appendRow([TextCellValue("Relatório de Acervo de Semáforos")]);
+    sheetObject.appendRow([TextCellValue("Filtros Aplicados: ${_construirResumoFiltros()}")]);
     sheetObject.appendRow([TextCellValue("")]);
 
-    List<TextCellValue> headers = [];
-    for (var grupo in _gruposFormulario) {
-      for (var campo in (grupo['campos'] as List)) {
-        headers.add(TextCellValue(campo['label'].toString().replaceAll(' *', '')));
-      }
+    List<TextCellValue> headers = [
+      TextCellValue('Semáforo'),
+      TextCellValue('Endereço'),
+      TextCellValue('Bairro'),
+      TextCellValue('Empresa'),
+    ];
+    
+    List<FiltroCheckbox> colunasExtras = _filtrosBooleanos.where((f) => f.ativo).toList();
+    for (var col in colunasExtras) {
+      headers.add(TextCellValue(col.label));
     }
+    
     sheetObject.appendRow(headers);
 
     for (var doc in docs) {
-      List<TextCellValue> row = [];
-      for (var grupo in _gruposFormulario) {
-        for (var campo in (grupo['campos'] as List)) {
-          var val = doc[campo['key']];
-          
-          if (val == true || val == 'Sim' || val == 'SIM' || val == 's' || val == 'true' || val == '1' || (val is num && val > 0) || (val is String && num.tryParse(val) != null && num.parse(val) > 0)) {
-            val = (val is num || (val is String && num.tryParse(val) != null)) ? val.toString() : 'Sim';
-          } else if (val == false || val == 'Não' || val == 'NÃO' || val == 'n' || val == 'false' || val == '0') {
-             val = '-';
-          }
-          
-          row.add(TextCellValue((val ?? '-').toString()));
+      List<TextCellValue> row = [
+        TextCellValue(doc['numero_formatado'].toString()),
+        TextCellValue((doc['endereco'] ?? '-').toString()),
+        TextCellValue((doc['bairro'] ?? '-').toString()),
+        TextCellValue((doc['empresa'] ?? '-').toString()),
+      ];
+      
+      for (var col in colunasExtras) {
+        var val = doc[col.dbField];
+        if (val == true || val == 'Sim' || val == 'SIM' || val == 's' || val == 'true' || val == '1' || (val is num && val > 0) || (val is String && num.tryParse(val) != null && num.parse(val) > 0)) {
+          val = (val is num || (val is String && num.tryParse(val) != null)) ? val.toString() : 'Sim';
+        } else {
+           val = '-';
         }
+        row.add(TextCellValue((val ?? '-').toString()));
       }
       sheetObject.appendRow(row);
     }
 
+    // Centralizando as células
     CellStyle centerStyle = CellStyle(horizontalAlign: HorizontalAlign.Center);
-    for (int r = 2; r < sheetObject.maxRows; r++) { 
+    for (int r = 3; r < sheetObject.maxRows; r++) { 
       for (int c = 0; c < sheetObject.maxRows; c++) {
         var cell = sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r));
         cell.cellStyle = centerStyle;
       }
     }
+
+    sheetObject.appendRow([TextCellValue("")]);
+    sheetObject.appendRow([TextCellValue('Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - $dataHora')]);
 
     var fileBytes = excel.encode();
     if (fileBytes != null) {
@@ -538,19 +564,45 @@ class _TelaRelatorioSemaforosState extends State<TelaRelatorioSemaforos> {
                 ),
               ),
               const SizedBox(height: 16),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.black87,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-                onPressed: () => Navigator.pop(context),
-                child: const Text(
-                  'Voltar',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
+              
+              // Botões de Ação no Fim do Modal (Exportar PDF, Exportar XLS e Voltar)
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      icon: const Icon(Icons.picture_as_pdf, color: Colors.white, size: 18),
+                      label: const Text('Exportar PDF', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      onPressed: () => _exportarPdfIndividual(data, idFormatado),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green.shade600,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      icon: const Icon(Icons.table_chart, color: Colors.white, size: 18),
+                      label: const Text('Exportar XLS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      onPressed: () => _baixarExcelIndividual(data, idFormatado),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.black87,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Voltar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -559,9 +611,144 @@ class _TelaRelatorioSemaforosState extends State<TelaRelatorioSemaforos> {
     );
   }
 
-  // --- EXPORTAÇÃO PDF ---
+  // --- EXPORTAÇÃO PDF INDIVIDUAL ---
+  Future<void> _exportarPdfIndividual(Map<String, dynamic> data, String numeroFormatado) async {
+    final pdf = pw.Document();
+    final dataHora = _obterDataHoraFormatada();
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        footer: (pw.Context context) {
+          return pw.Container(
+            alignment: pw.Alignment.center,
+            margin: const pw.EdgeInsets.only(top: 10.0),
+            padding: const pw.EdgeInsets.only(top: 10.0),
+            decoration: const pw.BoxDecoration(
+              border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300)),
+            ),
+            child: pw.Text(
+              'Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - $dataHora',
+              style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+              textAlign: pw.TextAlign.center,
+            ),
+          );
+        },
+        build: (pw.Context context) {
+          List<pw.Widget> conteudo = [
+            pw.Text(
+              'Ficha Técnica do Semáforo $numeroFormatado',
+              style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 20),
+          ];
+
+          for (var grupo in _gruposFormulario) {
+            bool temDado = (grupo['campos'] as List).any(
+              (c) => (data[c['key']] ?? '').toString().isNotEmpty,
+            );
+            if (!temDado) continue;
+
+            conteudo.add(
+              pw.Text(
+                grupo['titulo'],
+                style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey800),
+              ),
+            );
+            conteudo.add(pw.SizedBox(height: 8));
+
+            List<List<String>> tabelaGrupo = [];
+            for (var campo in (grupo['campos'] as List)) {
+              String valor = (data[campo['key']] ?? '').toString();
+              if (valor == 'true' || valor == '1') valor = 'Sim';
+              if (valor == 'false' || valor == '0') valor = 'Não';
+              
+              if (valor.isNotEmpty) {
+                tabelaGrupo.add([
+                  campo['label'].toString().replaceAll(' *', ''),
+                  valor,
+                ]);
+              }
+            }
+
+            conteudo.add(
+              pw.TableHelper.fromTextArray(
+                context: context,
+                cellAlignment: pw.Alignment.centerLeft,
+                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+                headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey600),
+                data: <List<String>>[
+                  <String>['Campo', 'Informação'],
+                  ...tabelaGrupo,
+                ],
+              ),
+            );
+            conteudo.add(pw.SizedBox(height: 20));
+          }
+          return conteudo;
+        },
+      ),
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => pdf.save(),
+      name: 'Ficha_Semaforo_$numeroFormatado.pdf',
+    );
+  }
+
+  // --- EXPORTAÇÃO EXCEL INDIVIDUAL (Substituindo o CSV pelo Excel verdadeiro) ---
+  Future<void> _baixarExcelIndividual(Map<String, dynamic> data, String numeroFormatado) async {
+    var excel = Excel.createExcel();
+    Sheet sheetObject = excel['Ficha'];
+    excel.setDefaultSheet('Ficha');
+
+    final dataHora = _obterDataHoraFormatada();
+
+    sheetObject.appendRow([TextCellValue("FICHA TÉCNICA - SEMÁFORO $numeroFormatado")]);
+    sheetObject.appendRow([TextCellValue("")]);
+
+    for (var grupo in _gruposFormulario) {
+      bool temDado = (grupo['campos'] as List).any(
+        (c) => (data[c['key']] ?? '').toString().isNotEmpty,
+      );
+      if (!temDado) continue;
+
+      sheetObject.appendRow([TextCellValue("--- ${grupo['titulo'].toString().toUpperCase()} ---")]);
+      sheetObject.appendRow([TextCellValue("Campo"), TextCellValue("Informação")]);
+      
+      for (var campo in (grupo['campos'] as List)) {
+        String valor = (data[campo['key']] ?? '').toString();
+        if (valor == 'true' || valor == '1') valor = 'Sim';
+        if (valor == 'false' || valor == '0') valor = 'Não';
+        
+        if (valor.isNotEmpty) {
+          sheetObject.appendRow([
+            TextCellValue(campo['label'].toString().replaceAll(' *', '')), 
+            TextCellValue(valor)
+          ]);
+        }
+      }
+      sheetObject.appendRow([TextCellValue("")]);
+    }
+    
+    sheetObject.appendRow([TextCellValue('Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - $dataHora')]);
+
+    var fileBytes = excel.encode();
+    if (fileBytes != null) {
+      final xfile = XFile.fromData(
+        Uint8List.fromList(fileBytes),
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        name: 'Ficha_Semaforo_$numeroFormatado.xlsx'
+      );
+      await Share.shareXFiles([xfile], text: 'Segue a ficha técnica do semáforo $numeroFormatado.');
+    }
+  }
+
+  // --- EXPORTAÇÃO PDF GLOBAL ---
   Future<void> _exportarPdfAcervo(List<Map<String, dynamic>> dadosVisiveis, List<FiltroCheckbox> colunasExtras) async {
     final pdf = pw.Document();
+    String dataHora = _obterDataHoraFormatada();
+    String resumoFiltros = _construirResumoFiltros();
 
     List<String> headers = [
       'Semáforo',
@@ -580,25 +767,29 @@ class _TelaRelatorioSemaforosState extends State<TelaRelatorioSemaforos> {
             children: [
               pw.Divider(color: PdfColors.grey300),
               pw.SizedBox(height: 5),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    'Relatório gerado pelo Sistema de Ocorrências semafóricas - SOS em ${DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now())}',
-                    style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
-                  ),
-                  pw.Text(
-                    'Página ${context.pageNumber} de ${context.pagesCount}',
-                    style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
-                  ),
-                ],
+              pw.Text(
+                'Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - $dataHora',
+                style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
+                textAlign: pw.TextAlign.center,
               ),
             ],
           );
         },
         build: (context) => [
-          pw.Text('Relatório de Acervo de Semáforos', style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
-          pw.Text('Total de Registros filtrados: ${dadosVisiveis.length}'),
+          pw.Center(
+            child: pw.Text(
+              'Relatório de Acervo de Semáforos', 
+              style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)
+            )
+          ),
+          pw.SizedBox(height: 5),
+          pw.Center(
+            child: pw.Text(
+              'Filtros Aplicados: $resumoFiltros', 
+              style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+              textAlign: pw.TextAlign.center
+            )
+          ),
           pw.SizedBox(height: 15),
           pw.TableHelper.fromTextArray(
             headers: headers,
@@ -616,6 +807,8 @@ class _TelaRelatorioSemaforosState extends State<TelaRelatorioSemaforos> {
               }
               return row;
             }).toList(),
+            headerAlignment: pw.Alignment.center,
+            cellAlignment: pw.Alignment.center,
             headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
             headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey800),
             cellStyle: const pw.TextStyle(fontSize: 7),
@@ -833,7 +1026,7 @@ class _TelaRelatorioSemaforosState extends State<TelaRelatorioSemaforos> {
                                             ),
                                             icon: const Icon(Icons.download, color: Colors.white, size: 16),
                                             label: const Text(
-                                              'Baixar Planilha (XLSX)',
+                                              'Baixar Planilha',
                                               style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                                             ),
                                             onPressed: () => _baixarExcelGlobal(docsFiltrados),
@@ -845,7 +1038,7 @@ class _TelaRelatorioSemaforosState extends State<TelaRelatorioSemaforos> {
                                             ),
                                             icon: const Icon(Icons.picture_as_pdf, color: Colors.white, size: 16),
                                             label: const Text(
-                                              'Baixar PDF (Com Colunas Visíveis)',
+                                              'Baixar PDF',
                                               style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                                             ),
                                             onPressed: () => _exportarPdfAcervo(docsFiltrados, colunasExtras),
@@ -903,7 +1096,7 @@ class _TelaRelatorioSemaforosState extends State<TelaRelatorioSemaforos> {
                                                         padding: const EdgeInsets.symmetric(horizontal: 4),
                                                         constraints: const BoxConstraints(),
                                                         icon: const Icon(Icons.visibility, color: Colors.blueGrey, size: 20),
-                                                        tooltip: 'Ficha Completa',
+                                                        tooltip: 'Ficha Completa e Exportações',
                                                         onPressed: () => _abrirModalDetalhesCompletos(d, d['numero_formatado'].toString()),
                                                       ),
                                                     ],
