@@ -46,6 +46,8 @@ class _TelaRelatorioOcorrenciasState extends State<TelaRelatorioOcorrencias> {
   DateTime? _dataInicioAbertura;
   DateTime? _dataFimFechamento;
 
+  bool _mostrarFiltros = true; // Controla se o painel de filtros está recolhido
+
   List<String> _empresas = [];
   List<Map<String, dynamic>> _falhasAux = []; 
   
@@ -553,7 +555,7 @@ class _TelaRelatorioOcorrenciasState extends State<TelaRelatorioOcorrencias> {
             children: [
               const SizedBox(height: 100),
 
-              // --- PAINEL DE FILTROS ---
+              // --- PAINEL DE FILTROS RETRÁTIL ---
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: ConstrainedBox(
@@ -561,30 +563,65 @@ class _TelaRelatorioOcorrenciasState extends State<TelaRelatorioOcorrencias> {
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(color: const Color(0xFF3f5066), borderRadius: BorderRadius.circular(10)),
-                    child: Wrap(
-                      spacing: 15,
-                      runSpacing: 15,
-                      crossAxisAlignment: WrapCrossAlignment.end,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _buildAutocompleteField('Nº Semáforo:', _filtroSemaforoCtrl, _focusSemaforo, _opcoesSemaforos),
-                        _buildAutocompleteField('Endereço:', _filtroEnderecoCtrl, _focusEndereco, _opcoesEnderecos),
-                        _buildAutocompleteField('Falha:', _filtroFalhaCtrl, _focusFalha, _opcoesFalhas),
-                        
-                        _buildDropdown('Empresa:', _filtroEmpresa, ['Todas', ..._empresas], (v) => setState(() => _filtroEmpresa = v == 'Todas' ? '' : v!)),
-                        _buildDropdown('Status Ocorrência:', _filtroStatus, ['Todos', 'Aberto', 'Em Deslocamento', 'Em Atendimento', 'Finalizado'], (v) => setState(() => _filtroStatus = v == 'Todos' ? '' : v!)),
-                        _buildDropdown('Status Prazo:', _filtroPrazo, ['Todos', 'No Prazo', 'Vencido'], (v) => setState(() => _filtroPrazo = v == 'Todos' ? '' : v!)),
-                        
-                        _buildDateFilter('De (Abertura):', _dataInicioAbertura, (d) => setState(() => _dataInicioAbertura = d)),
-                        _buildDateFilter('Até (Fechamento):', _dataFimFechamento, (d) => setState(() => _dataFimFechamento = d)),
-
-                        OutlinedButton(
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white, side: const BorderSide(color: Colors.white54),
-                            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                        // Cabeçalho clicável
+                        InkWell(
+                          onTap: () {
+                            setState(() {
+                              _mostrarFiltros = !_mostrarFiltros;
+                            });
+                          },
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Filtros de Busca',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16),
+                              ),
+                              Icon(
+                                _mostrarFiltros
+                                    ? Icons.keyboard_arrow_up
+                                    : Icons.keyboard_arrow_down,
+                                color: Colors.white,
+                              ),
+                            ],
                           ),
-                          onPressed: _limparFiltros,
-                          child: const Text('Limpar Filtros'),
                         ),
+                        // Área dos campos
+                        if (_mostrarFiltros) ...[
+                          const SizedBox(height: 16),
+                          Wrap(
+                            spacing: 15,
+                            runSpacing: 15,
+                            crossAxisAlignment: WrapCrossAlignment.end,
+                            children: [
+                              _buildAutocompleteField('Nº Semáforo:', _filtroSemaforoCtrl, _focusSemaforo, _opcoesSemaforos),
+                              _buildAutocompleteField('Endereço:', _filtroEnderecoCtrl, _focusEndereco, _opcoesEnderecos),
+                              _buildAutocompleteField('Falha:', _filtroFalhaCtrl, _focusFalha, _opcoesFalhas),
+                              
+                              _buildDropdown('Empresa:', _filtroEmpresa, ['Todas', ..._empresas], (v) => setState(() => _filtroEmpresa = v == 'Todas' ? '' : v!)),
+                              _buildDropdown('Status Ocorrência:', _filtroStatus, ['Todos', 'Aberto', 'Em Deslocamento', 'Em Atendimento', 'Finalizado'], (v) => setState(() => _filtroStatus = v == 'Todos' ? '' : v!)),
+                              _buildDropdown('Status Prazo:', _filtroPrazo, ['Todos', 'No Prazo', 'Vencido'], (v) => setState(() => _filtroPrazo = v == 'Todos' ? '' : v!)),
+                              
+                              _buildDateFilter('De (Abertura):', _dataInicioAbertura, (d) => setState(() => _dataInicioAbertura = d)),
+                              _buildDateFilter('Até (Fechamento):', _dataFimFechamento, (d) => setState(() => _dataFimFechamento = d)),
+
+                              OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white, side: const BorderSide(color: Colors.white54),
+                                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                                ),
+                                onPressed: _limparFiltros,
+                                child: const Text('Limpar Filtros'),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -646,23 +683,28 @@ class _TelaRelatorioOcorrenciasState extends State<TelaRelatorioOcorrencias> {
                               Container(
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: const BorderRadius.vertical(top: Radius.circular(10))),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                // Uso do Wrap para o cabeçalho se adaptar ao mobile
+                                child: Wrap(
+                                  alignment: WrapAlignment.spaceBetween,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  spacing: 10,
+                                  runSpacing: 10,
                                   children: [
                                     Text('Total: ${docs.length} registros', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
-                                    Row(
+                                    Wrap(
+                                      spacing: 10,
+                                      runSpacing: 10,
                                       children: [
                                         ElevatedButton.icon(
                                           style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade600, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
                                           icon: const Icon(Icons.download, color: Colors.white, size: 16),
-                                          label: const Text('Baixar Planilha (XLSX)', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                          label: const Text('Baixar Planilha', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                                           onPressed: () => _baixarExcel(docs),
                                         ),
-                                        const SizedBox(width: 10),
                                         ElevatedButton.icon(
                                           style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
                                           icon: const Icon(Icons.picture_as_pdf, color: Colors.white, size: 16),
-                                          label: const Text('Baixar PDF Global', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                          label: const Text('Baixar PDF', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                                           onPressed: () => _exportarPdfGlobal(docs),
                                         ),
                                       ],

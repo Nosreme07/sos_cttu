@@ -45,6 +45,8 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
   final FocusNode _focusIntegrante = FocusNode();
   final FocusNode _focusSemaforo = FocusNode();
 
+  bool _mostrarFiltros = true; // Controla se o painel de filtros está recolhido
+
   List<String> _empresas = [];
   List<String> _tiposVeiculo = [];
   List<QueryDocumentSnapshot> _todasOcorrencias = [];
@@ -75,13 +77,11 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
   }
 
   Future<void> _carregarAuxiliares() async {
-    // Carrega as ocorrências para cruzar com as equipes
     final resOcorrencias = await FirebaseFirestore.instance
         .collection('Gerenciamento_ocorrencias')
         .get();
     _todasOcorrencias = resOcorrencias.docs;
 
-    // Busca Empresas, Equipes, Veículos, Semáforos e Integrantes
     final resEmpresas = await FirebaseFirestore.instance.collection('empresas').get();
     final resEquipes = await FirebaseFirestore.instance.collection('equipes').get();
     final resVeiculos = await FirebaseFirestore.instance.collection('veiculos').get();
@@ -94,19 +94,16 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
     Set<String> intSet = {};
     Set<String> semaforoSet = {};
 
-    // Salva os integrantes na memória para uso no filtro de empresa
     List<Map<String, dynamic>> intsLocal = [];
     for (var doc in resIntegrantes.docs) {
       intsLocal.add(doc.data());
     }
 
-    // Pega as empresas da coleção oficial de empresas
     for (var doc in resEmpresas.docs) {
       String emp = (doc.data()['nome'] ?? doc.data()['empresa'] ?? doc.id).toString().toUpperCase();
       if (emp.isNotEmpty) empSet.add(emp);
     }
 
-    // Pega os dados das equipes
     for (var doc in resEquipes.docs) {
       var d = doc.data();
       
@@ -178,7 +175,6 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
     return Colors.grey;
   }
 
-  // --- MOTOR DE CRUZAMENTO: QUAIS OCORRÊNCIAS ESTA EQUIPE ATENDEU? ---
   List<Map<String, dynamic>> _obterOcorrenciasDaEquipe(Map<String, dynamic> eqData) {
     String placa = (eqData['placa'] ?? '').toString().toUpperCase();
     String intsStr = (eqData['integrantes_str'] ?? '').toString().toUpperCase();
@@ -217,7 +213,6 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
     return atendidas;
   }
 
-  // --- POPUP DE DETALHES COMPLETOS DA OCORRÊNCIA (Reutilizado do Relatorio Ocorrencias) ---
   void _abrirDetalhesOcorrencia(Map<String, dynamic> data) {
     showDialog(
       context: context,
@@ -285,7 +280,6 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
     );
   }
 
-  // --- MODAL DE DETALHES DO TURNO DA EQUIPE ---
   void _abrirDetalhes(Map<String, dynamic> data, List<Map<String, dynamic>> ocorrencias) {
     showDialog(
       context: context,
@@ -371,15 +365,21 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
             ),
           ),
           actions: [
-            TextButton.icon(
-              icon: const Icon(Icons.picture_as_pdf, color: Colors.redAccent),
-              label: const Text('Baixar PDF deste Turno', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-              onPressed: () => _gerarPdfIndividual(data, ocorrencias),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Fechar'),
-            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                TextButton.icon(
+                  icon: const Icon(Icons.picture_as_pdf, color: Colors.redAccent),
+                  label: const Text('Baixar PDF deste Turno', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                  onPressed: () => _gerarPdfIndividual(data, ocorrencias),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Fechar'),
+                ),
+              ],
+            )
           ],
         );
       },
@@ -401,7 +401,6 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
     );
   }
 
-  // --- PDF INDIVIDUAL DO TURNO DA EQUIPE (COM ASSINATURA) ---
   Future<void> _gerarPdfIndividual(Map<String, dynamic> data, List<Map<String, dynamic>> ocorrencias) async {
     final pdf = pw.Document();
     String placa = data['placa'] ?? 'S_PLACA';
@@ -478,7 +477,6 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
             );
           }),
 
-          // --- CAMPO DE ASSINATURA NO FINAL ---
           pw.SizedBox(height: 60),
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.center,
@@ -499,7 +497,6 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
     await Printing.layoutPdf(onLayout: (format) async => pdf.save(), name: 'Turno_Equipe_$placa.pdf');
   }
 
-  // --- PDF GLOBAL DAS EQUIPES ---
   Future<void> _exportarPdfGlobal(List<QueryDocumentSnapshot> docs) async {
     if (docs.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Não há dados para gerar PDF.')));
@@ -571,7 +568,6 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
     await Printing.layoutPdf(onLayout: (format) async => pdf.save(), name: 'Relatorio_Global_Equipes.pdf');
   }
 
-  // --- EXPORTAÇÃO EXCEL (XLSX) GLOBAL ---
   void _baixarExcel(List<QueryDocumentSnapshot> docs) async {
     var excel = Excel.createExcel();
     Sheet sheetObject = excel['Relatório'];
@@ -638,7 +634,6 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
     }
   }
 
-  // --- EXPORTAÇÃO EXCEL (XLSX) INDIVIDUAL DE 1 EQUIPE ---
   void _baixarExcelIndividual(Map<String, dynamic> d) async {
     var excel = Excel.createExcel();
     Sheet sheetObject = excel['Turno Equipe'];
@@ -720,7 +715,7 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
             children: [
               const SizedBox(height: 100),
 
-              // --- PAINEL DE FILTROS ---
+              // --- PAINEL DE FILTROS RETRÁTIL ---
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: ConstrainedBox(
@@ -731,31 +726,64 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
                       color: const Color(0xFF3f5066),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Wrap(
-                      spacing: 15,
-                      runSpacing: 15,
-                      crossAxisAlignment: WrapCrossAlignment.end,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _buildAutocompleteField('Placa:', _filtroPlacaCtrl, _focusPlaca, _opcoesPlacas),
-                        _buildAutocompleteField('Integrante:', _filtroIntegranteCtrl, _focusIntegrante, _opcoesIntegrantes),
-                        _buildAutocompleteField('Semáforo Atendido:', _filtroSemaforoCtrl, _focusSemaforo, _opcoesSemaforos),
-
-                        _buildDropdown('Empresa:', _filtroEmpresa, ['Todas', ..._empresas], (v) => setState(() => _filtroEmpresa = v == 'Todas' ? '' : v!)),
-                        _buildDropdown('Tipo Veículo:', _filtroTipo, ['Todos', ..._tiposVeiculo], (v) => setState(() => _filtroTipo = v == 'Todos' ? '' : v!)),
-                        _buildDropdown('Status do Turno:', _filtroStatus, ['Todos', 'Ativo', 'Finalizado'], (v) => setState(() => _filtroStatus = v == 'Todos' ? '' : v!)),
-
-                        _buildDateFilter('De (Início):', _dataInicio, (d) => setState(() => _dataInicio = d)),
-                        _buildDateFilter('Até (Início):', _dataFim, (d) => setState(() => _dataFim = d)),
-
-                        OutlinedButton(
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            side: const BorderSide(color: Colors.white54),
-                            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                        InkWell(
+                          onTap: () {
+                            setState(() {
+                              _mostrarFiltros = !_mostrarFiltros;
+                            });
+                          },
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Filtros de Busca',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16),
+                              ),
+                              Icon(
+                                _mostrarFiltros
+                                    ? Icons.keyboard_arrow_up
+                                    : Icons.keyboard_arrow_down,
+                                color: Colors.white,
+                              ),
+                            ],
                           ),
-                          onPressed: _limparFiltros,
-                          child: const Text('Limpar Filtros'),
                         ),
+                        if (_mostrarFiltros) ...[
+                          const SizedBox(height: 16),
+                          Wrap(
+                            spacing: 15,
+                            runSpacing: 15,
+                            crossAxisAlignment: WrapCrossAlignment.end,
+                            children: [
+                              _buildAutocompleteField('Placa:', _filtroPlacaCtrl, _focusPlaca, _opcoesPlacas),
+                              _buildAutocompleteField('Integrante:', _filtroIntegranteCtrl, _focusIntegrante, _opcoesIntegrantes),
+                              _buildAutocompleteField('Semáforo Atendido:', _filtroSemaforoCtrl, _focusSemaforo, _opcoesSemaforos),
+
+                              _buildDropdown('Empresa:', _filtroEmpresa, ['Todas', ..._empresas], (v) => setState(() => _filtroEmpresa = v == 'Todas' ? '' : v!)),
+                              _buildDropdown('Tipo Veículo:', _filtroTipo, ['Todos', ..._tiposVeiculo], (v) => setState(() => _filtroTipo = v == 'Todos' ? '' : v!)),
+                              _buildDropdown('Status do Turno:', _filtroStatus, ['Todos', 'Ativo', 'Finalizado'], (v) => setState(() => _filtroStatus = v == 'Todos' ? '' : v!)),
+
+                              _buildDateFilter('De (Início):', _dataInicio, (d) => setState(() => _dataInicio = d)),
+                              _buildDateFilter('Até (Início):', _dataFim, (d) => setState(() => _dataFim = d)),
+
+                              OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  side: const BorderSide(color: Colors.white54),
+                                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                                ),
+                                onPressed: _limparFiltros,
+                                child: const Text('Limpar Filtros'),
+                              ),
+                            ],
+                          ),
+                        ]
                       ],
                     ),
                   ),
@@ -786,17 +814,13 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
                           }
                           if (!snapshot.hasData) return const Center(child: Text('Nenhum dado.'));
 
-                          // Aplica Filtros
                           var docs = snapshot.data!.docs.where((doc) {
                             var d = doc.data() as Map<String, dynamic>;
 
-                            // --- NOVO: CHECAGEM DE EMPRESA AMPLIADA ---
-                            // Verifica se a empresa está na equipe ou em qualquer integrante da equipe
                             if (_filtroEmpresa.isNotEmpty) {
                               bool empresaBate = (d['empresa'] ?? '').toString().toUpperCase() == _filtroEmpresa;
                               if (!empresaBate) {
                                 String intsEquipe = (d['integrantes_str'] ?? '').toString().toUpperCase();
-                                // Procura nos integrantes salvos na memória se algum que está nessa equipe pertence à empresa filtrada
                                 bool algumIntBate = _todosIntegrantes.any((integranteMap) {
                                   String nomeInt = (integranteMap['nomeCompleto'] ?? '').toString().toUpperCase();
                                   String empInt = (integranteMap['empresa'] ?? '').toString().toUpperCase();
@@ -822,7 +846,6 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
                             return true;
                           }).toList();
 
-                          // Filtro complexo: Se filtrou por "Semáforo Atendido"
                           if (_filtroSemaforoCtrl.text.isNotEmpty) {
                             docs = docs.where((doc) {
                               var d = doc.data() as Map<String, dynamic>;
@@ -844,26 +867,30 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
                                   color: Colors.grey.shade100,
                                   borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
                                 ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                child: Wrap(
+                                  alignment: WrapAlignment.spaceBetween,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  spacing: 10,
+                                  runSpacing: 10,
                                   children: [
                                     Text(
                                       'Total: ${docs.length} registros',
                                       style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey),
                                     ),
-                                    Row(
+                                    Wrap(
+                                      spacing: 10,
+                                      runSpacing: 10,
                                       children: [
                                         ElevatedButton.icon(
                                           style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade600, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
                                           icon: const Icon(Icons.download, color: Colors.white, size: 16),
-                                          label: const Text('Baixar Planilha (XLSX)', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                          label: const Text('Baixar Planilha', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                                           onPressed: () => _baixarExcel(docs),
                                         ),
-                                        const SizedBox(width: 10),
                                         ElevatedButton.icon(
                                           style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
                                           icon: const Icon(Icons.picture_as_pdf, color: Colors.white, size: 16),
-                                          label: const Text('Baixar PDF Global', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                          label: const Text('Baixar PDF', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                                           onPressed: () => _exportarPdfGlobal(docs),
                                         ),
                                       ],
@@ -937,30 +964,35 @@ class _TelaRelatorioEquipesState extends State<TelaRelatorioEquipes> {
                                                     ),
                                                   ),
                                                   DataCell(Center(child: Text('${d['km_rodado'] ?? 0} km', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12)))),
+                                                  // --- CORREÇÃO DO OVERFLOW NA COLUNA DE AÇÕES AQUI ---
                                                   DataCell(
                                                     Center(
-                                                      child: SizedBox(
-                                                        width: 120,
-                                                        child: Row(
-                                                          mainAxisAlignment: MainAxisAlignment.center,
-                                                          children: [
-                                                            IconButton(
-                                                              icon: const Icon(Icons.visibility, color: Colors.blueGrey, size: 20),
-                                                              tooltip: 'Ver Detalhes do Turno',
-                                                              onPressed: () => _abrirDetalhes(d, ocorrenciasDestaEquipe),
-                                                            ),
-                                                            IconButton(
-                                                              icon: const Icon(Icons.download_outlined, color: Colors.green, size: 20),
-                                                              tooltip: 'Baixar Planilha Individual',
-                                                              onPressed: () => _baixarExcelIndividual(d),
-                                                            ),
-                                                            IconButton(
-                                                              icon: const Icon(Icons.picture_as_pdf, color: Colors.redAccent, size: 20),
-                                                              tooltip: 'Baixar PDF',
-                                                              onPressed: () => _gerarPdfIndividual(d, ocorrenciasDestaEquipe),
-                                                            ),
-                                                          ],
-                                                        ),
+                                                      child: Row(
+                                                        mainAxisSize: MainAxisSize.min, // Usa apenas o espaço mínimo necessário
+                                                        mainAxisAlignment: MainAxisAlignment.center,
+                                                        children: [
+                                                          IconButton(
+                                                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                                                            constraints: const BoxConstraints(), // Tira o padding grande padrão
+                                                            icon: const Icon(Icons.visibility, color: Colors.blueGrey, size: 20),
+                                                            tooltip: 'Ver Detalhes do Turno',
+                                                            onPressed: () => _abrirDetalhes(d, ocorrenciasDestaEquipe),
+                                                          ),
+                                                          IconButton(
+                                                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                                                            constraints: const BoxConstraints(),
+                                                            icon: const Icon(Icons.download_outlined, color: Colors.green, size: 20),
+                                                            tooltip: 'Baixar Planilha Individual',
+                                                            onPressed: () => _baixarExcelIndividual(d),
+                                                          ),
+                                                          IconButton(
+                                                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                                                            constraints: const BoxConstraints(),
+                                                            icon: const Icon(Icons.picture_as_pdf, color: Colors.redAccent, size: 20),
+                                                            tooltip: 'Baixar PDF',
+                                                            onPressed: () => _gerarPdfIndividual(d, ocorrenciasDestaEquipe),
+                                                          ),
+                                                        ],
                                                       ),
                                                     ),
                                                   ),

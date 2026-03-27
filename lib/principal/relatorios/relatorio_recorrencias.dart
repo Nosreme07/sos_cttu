@@ -40,6 +40,7 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
   List<String> _falhas = [];
 
   bool _isLoading = true;
+  bool _mostrarFiltros = true; // Controla se o painel de filtros está aberto ou fechado
   List<QueryDocumentSnapshot> _todasOcorrenciasCache = [];
   List<Map<String, dynamic>> _rankingGerado = [];
 
@@ -49,14 +50,11 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
     _inicializarDados();
   }
 
+  // Busca os dados de forma segura, sem travar se algum campo estiver vazio
   Future<void> _inicializarDados() async {
     setState(() => _isLoading = true);
 
     try {
-      final resFalhas =
-          await FirebaseFirestore.instance.collection('falhas').get();
-      final resEmpresas =
-          await FirebaseFirestore.instance.collection('empresas').get();
       final resOcorrencias = await FirebaseFirestore.instance
           .collection('Gerenciamento_ocorrencias')
           .get();
@@ -64,27 +62,66 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
       _todasOcorrenciasCache = resOcorrencias.docs;
 
       Set<String> empSet = {};
-      for (var doc in resEmpresas.docs) {
-        String emp = (doc.data()['nome'] ?? doc.data()['empresa'] ?? doc.id)
-            .toString()
-            .toUpperCase();
-        if (emp.isNotEmpty) empSet.add(emp);
+      Set<String> falhasSet = {};
+
+      try {
+        final resEmpresas =
+            await FirebaseFirestore.instance.collection('empresas').get();
+        for (var doc in resEmpresas.docs) {
+          var data = doc.data() as Map<String, dynamic>? ?? {};
+          String emp = (data['nome'] ?? data['empresa'] ?? doc.id)
+              .toString()
+              .trim()
+              .toUpperCase();
+          if (emp.isNotEmpty && emp != 'NULL') empSet.add(emp);
+        }
+      } catch (e) {
+        debugPrint("Aviso ao ler empresas: $e");
       }
 
-      List<String> falhasTemp = resFalhas.docs
-          .map((d) =>
-              (d['tipo_da_falha'] ?? d['falha'] ?? '').toString().toUpperCase())
-          .toSet()
-          .toList();
-      falhasTemp.sort();
+      try {
+        final resFalhas =
+            await FirebaseFirestore.instance.collection('falhas').get();
+        for (var doc in resFalhas.docs) {
+          var data = doc.data() as Map<String, dynamic>? ?? {};
+          String falha = (data['tipo_da_falha'] ?? data['falha'] ?? '')
+              .toString()
+              .trim()
+              .toUpperCase();
+          if (falha.isNotEmpty && falha != 'NULL') falhasSet.add(falha);
+        }
+      } catch (e) {
+        debugPrint("Aviso ao ler falhas: $e");
+      }
+
+      // Varre as ocorrências para garantir que nenhuma empresa ou falha fique de fora
+      for (var doc in _todasOcorrenciasCache) {
+        var d = doc.data() as Map<String, dynamic>? ?? {};
+
+        String emp = (d['empresa_semaforo'] ?? d['empresa_responsavel'] ?? '')
+            .toString()
+            .trim()
+            .toUpperCase();
+        if (emp.isNotEmpty && emp != 'NULL' && emp != 'N/D' && emp != 'N/A') {
+          empSet.add(emp);
+        }
+
+        String falha = (d['tipo_da_falha'] ?? '').toString().trim().toUpperCase();
+        if (falha.isNotEmpty && falha != 'NULL' && falha != 'N/A') {
+          falhasSet.add(falha);
+        }
+      }
 
       List<String> empresasTemp = empSet.toList();
       empresasTemp.sort();
 
+      List<String> falhasTemp = falhasSet.toList();
+      falhasTemp.sort();
+
       if (mounted) {
         setState(() {
-          _falhas = falhasTemp;
           _empresas = empresasTemp;
+          _falhas = falhasTemp;
         });
 
         await _gerarRankingAsync();
@@ -174,8 +211,8 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
     return Colors.grey;
   }
 
-  void _abrirHistorico(
-      String semaforo, List<QueryDocumentSnapshot> todasOcorrencias) {
+  void _abrirHistorico(String semaforo, String endereco,
+      List<QueryDocumentSnapshot> todasOcorrencias) {
     var historico = todasOcorrencias.where((doc) {
       var d = doc.data() as Map<String, dynamic>;
       return (d['semaforo'] ?? '').toString() == semaforo;
@@ -193,7 +230,7 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
       builder: (context) {
         return AlertDialog(
           title: Text(
-            'Histórico Completo: Semáforo $semaforo',
+            'Histórico de Recorrência do semáforo: $semaforo - $endereco',
             style: const TextStyle(
                 fontWeight: FontWeight.bold, color: Colors.blueGrey),
           ),
@@ -215,64 +252,100 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
                             side: BorderSide(color: Colors.grey.shade300)),
-                        child: ListTile(
-                          title: Text(
-                            'Ocorrência Nº ${d['numero_da_ocorrencia'] ?? historico[index].id}',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                                color: Colors.blueGrey),
-                          ),
-                          subtitle: Column(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Usando Expanded para evitar barra amarela no número da ocorrência
+                                  Expanded(
+                                    child: InkWell(
+                                      onTap: () => _abrirDetalhesCompletos(d),
+                                      child: Text(
+                                        'Nº Ocorrência: ${d['numero_da_ocorrencia'] ?? historico[index].id}',
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 14,
+                                            color: Colors.blue,
+                                            decoration:
+                                                TextDecoration.underline),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                        color: _corStatus(st),
+                                        borderRadius: BorderRadius.circular(4)),
+                                    child: Text(st.toUpperCase(),
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ),
+                              const Divider(),
                               const SizedBox(height: 4),
                               Text(
                                   'Abertura: ${_formatarDataHoraCompleta(d['data_de_abertura'])}',
-                                  style: const TextStyle(fontSize: 11)),
-                              Text('Falha: ${d['tipo_da_falha'] ?? '-'}',
-                                  style: const TextStyle(fontSize: 11)),
+                                  style: const TextStyle(fontSize: 12)),
                               Text(
-                                  'Encontrada: ${d['falha_aparente_final'] ?? '-'}',
+                                  'Fechamento: ${_formatarDataHoraCompleta(d['data_de_finalizacao'])}',
+                                  style: const TextStyle(fontSize: 12)),
+                              Text(
+                                  'Equipe Responsável: ${d['equipe_atrelada'] ?? d['equipe_responsavel'] ?? '-'}',
+                                  style: const TextStyle(fontSize: 12)),
+                              Text('Falha relatada: ${d['tipo_da_falha'] ?? '-'}',
+                                  style: const TextStyle(fontSize: 12)),
+                              Text(
+                                  'Falha encontrada: ${d['falha_aparente_final'] ?? '-'}',
                                   style: const TextStyle(
-                                      fontSize: 11,
+                                      fontSize: 12,
                                       fontWeight: FontWeight.bold,
                                       color: Colors.black87)),
                             ],
                           ),
-                          trailing: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                                color: _corStatus(st),
-                                borderRadius: BorderRadius.circular(4)),
-                            child: Text(st.toUpperCase(),
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold)),
-                          ),
-                          onTap: () {
-                            _abrirDetalhesCompletos(d);
-                          },
                         ),
                       );
                     },
                   ),
           ),
           actions: [
-            TextButton.icon(
-              icon: const Icon(Icons.picture_as_pdf, color: Colors.redAccent),
-              label: const Text('Baixar PDF deste Histórico',
-                  style: TextStyle(
-                      color: Colors.redAccent, fontWeight: FontWeight.bold)),
-              onPressed: () =>
-                  _exportarPdfHistoricoSemaforo(semaforo, historico),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Fechar'),
-            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                TextButton.icon(
+                  icon: const Icon(Icons.picture_as_pdf, color: Colors.redAccent),
+                  label: const Text('Baixar PDF',
+                      style: TextStyle(
+                          color: Colors.redAccent,
+                          fontWeight: FontWeight.bold)),
+                  onPressed: () =>
+                      _exportarPdfHistoricoSemaforo(semaforo, endereco, historico),
+                ),
+                TextButton.icon(
+                  icon: Icon(Icons.download, color: Colors.green.shade700),
+                  label: Text('Baixar Planilha',
+                      style: TextStyle(
+                          color: Colors.green.shade700,
+                          fontWeight: FontWeight.bold)),
+                  onPressed: () =>
+                      _baixarExcelHistoricoSemaforo(semaforo, endereco, historico),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Fechar'),
+                ),
+              ],
+            )
           ],
         );
       },
@@ -359,7 +432,7 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
 
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
+        pageFormat: PdfPageFormat.a4.landscape, 
         margin: const pw.EdgeInsets.all(30),
         footer: (pw.Context context) {
           return pw.Column(
@@ -386,10 +459,14 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
           );
         },
         build: (context) => [
-          pw.Text('Relatório de Recorrências (Top 10)',
+          pw.Center(
+            child: pw.Text(
+              'Relatório de Recorrências (Top 10)',
               style: pw.TextStyle(
-                  fontSize: 20, fontWeight: pw.FontWeight.bold)),
-          pw.SizedBox(height: 15),
+                  fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey800),
+            ),
+          ),
+          pw.SizedBox(height: 20),
           pw.TableHelper.fromTextArray(
             headers: [
               'Posição',
@@ -409,12 +486,23 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                 d['total'].toString(),
               ];
             }).toList(),
+            headerAlignment: pw.Alignment.center,
             headerStyle: pw.TextStyle(
-                fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+                fontWeight: pw.FontWeight.bold, 
+                color: PdfColors.white,
+                fontSize: 10, 
+            ),
             headerDecoration:
                 const pw.BoxDecoration(color: PdfColors.blueGrey800),
-            cellStyle: const pw.TextStyle(fontSize: 9),
             cellAlignment: pw.Alignment.center,
+            cellStyle: const pw.TextStyle(fontSize: 9),
+            columnWidths: {
+              0: const pw.FixedColumnWidth(50), 
+              1: const pw.FixedColumnWidth(70), 
+              2: const pw.FlexColumnWidth(),   
+              3: const pw.FixedColumnWidth(100),
+              4: const pw.FixedColumnWidth(110),
+            },
           ),
         ],
       ),
@@ -422,11 +510,11 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
 
     await Printing.layoutPdf(
         onLayout: (format) async => pdf.save(),
-        name: 'Relatorio_Recorrencias.pdf');
+        name: 'Relatorio_Recorrencias_Global.pdf');
   }
 
-  Future<void> _exportarPdfHistoricoSemaforo(
-      String semaforo, List<QueryDocumentSnapshot> historicoDocs) async {
+  Future<void> _exportarPdfHistoricoSemaforo(String semaforo, String endereco,
+      List<QueryDocumentSnapshot> historicoDocs) async {
     final pdf = pw.Document();
 
     pdf.addPage(
@@ -443,9 +531,9 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text(
-                    'Relatório gerado pelo Sistema de Ocorrências semafóricas - SOS em ${DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now())}',
+                    'Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS em ${DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now())}',
                     style: const pw.TextStyle(
-                        fontSize: 10, color: PdfColors.grey600),
+                        fontSize: 9, color: PdfColors.grey600),
                   ),
                   pw.Text(
                     'Página ${context.pageNumber} de ${context.pagesCount}',
@@ -458,10 +546,20 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
           );
         },
         build: (context) => [
-          pw.Text('Histórico de Ocorrências - Semáforo $semaforo',
-              style: pw.TextStyle(
-                  fontSize: 20, fontWeight: pw.FontWeight.bold)),
-          pw.Text('Total de Ocorrências: ${historicoDocs.length}'),
+          pw.Center(
+            child: pw.Text('Histórico de Recorrências do Semáforo: $semaforo',
+                style: pw.TextStyle(
+                    fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey800)),
+          ),
+          pw.Center(
+            child: pw.Text('Endereço: $endereco',
+                style: pw.TextStyle(fontSize: 14, color: PdfColors.grey700)),
+          ),
+          pw.SizedBox(height: 5),
+          pw.Center(
+            child: pw.Text('Total de Ocorrências: ${historicoDocs.length}',
+                style: const pw.TextStyle(fontSize: 12)),
+          ),
           pw.SizedBox(height: 15),
           pw.TableHelper.fromTextArray(
             headers: [
@@ -486,12 +584,22 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                 (d['falha_aparente_final'] ?? '-').toString(),
               ];
             }).toList(),
+            headerAlignment: pw.Alignment.center,
             headerStyle: pw.TextStyle(
-                fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+                fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 9),
             headerDecoration:
                 const pw.BoxDecoration(color: PdfColors.blueGrey800),
-            cellStyle: const pw.TextStyle(fontSize: 8),
             cellAlignment: pw.Alignment.center,
+            cellStyle: const pw.TextStyle(fontSize: 8),
+            columnWidths: {
+              0: const pw.FixedColumnWidth(60),
+              1: const pw.FixedColumnWidth(85),
+              2: const pw.FixedColumnWidth(85),
+              3: const pw.FixedColumnWidth(55),
+              4: const pw.FixedColumnWidth(80),
+              5: const pw.FlexColumnWidth(),
+              6: const pw.FlexColumnWidth(),
+            },
           ),
         ],
       ),
@@ -551,6 +659,15 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
       pos++;
     }
 
+    CellStyle centerStyle = CellStyle(horizontalAlign: HorizontalAlign.Center);
+    for (int r = 0; r < sheetObject.maxRows; r++) {
+      for (int c = 0; c < sheetObject.maxRows; c++) { 
+        var cell = sheetObject
+            .cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r));
+        cell.cellStyle = centerStyle;
+      }
+    }
+
     var fileBytes = excel.encode();
     if (fileBytes != null) {
       final xfile = XFile.fromData(
@@ -559,6 +676,65 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
               'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           name: 'Relatorio_Recorrencias.xlsx');
       await Share.shareXFiles([xfile], text: 'Relatório de Recorrências Top 10');
+
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Planilha baixada com sucesso!'),
+            backgroundColor: Colors.green));
+    }
+  }
+
+  void _baixarExcelHistoricoSemaforo(String semaforo, String endereco,
+      List<QueryDocumentSnapshot> historicoDocs) async {
+    var excel = Excel.createExcel();
+    Sheet sheetObject = excel['Histórico'];
+    excel.setDefaultSheet('Histórico');
+
+    sheetObject.appendRow(
+        [TextCellValue("Histórico de Recorrências - Semáforo: $semaforo")]);
+    sheetObject.appendRow([TextCellValue("Endereço: $endereco")]);
+    sheetObject.appendRow([TextCellValue("")]);
+
+    sheetObject.appendRow([
+      TextCellValue("Nº Ocorrência"),
+      TextCellValue("Abertura"),
+      TextCellValue("Finalização"),
+      TextCellValue("Status"),
+      TextCellValue("Equipe"),
+      TextCellValue("Falha Relatada"),
+      TextCellValue("Falha Encontrada")
+    ]);
+
+    for (var doc in historicoDocs) {
+      var d = doc.data() as Map<String, dynamic>;
+      sheetObject.appendRow([
+        TextCellValue((d['numero_da_ocorrencia'] ?? doc.id).toString()),
+        TextCellValue(_formatarDataHoraCompleta(d['data_de_abertura'])),
+        TextCellValue(_formatarDataHoraCompleta(d['data_de_finalizacao'])),
+        TextCellValue((d['status'] ?? '-').toString().toUpperCase()),
+        TextCellValue((d['equipe_atrelada'] ?? d['equipe_responsavel'] ?? '-').toString()),
+        TextCellValue((d['tipo_da_falha'] ?? '-').toString()),
+        TextCellValue((d['falha_aparente_final'] ?? '-').toString()),
+      ]);
+    }
+
+    CellStyle centerStyle = CellStyle(horizontalAlign: HorizontalAlign.Center);
+    for (int r = 0; r < sheetObject.maxRows; r++) {
+      for (int c = 0; c < sheetObject.maxRows; c++) { 
+        var cell = sheetObject
+            .cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r));
+        cell.cellStyle = centerStyle;
+      }
+    }
+
+    var fileBytes = excel.encode();
+    if (fileBytes != null) {
+      final xfile = XFile.fromData(
+          Uint8List.fromList(fileBytes),
+          mimeType:
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          name: 'Historico_Semaforo_$semaforo.xlsx');
+      await Share.shareXFiles([xfile], text: 'Histórico Semáforo $semaforo');
 
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -596,7 +772,7 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
             children: [
               const SizedBox(height: 100),
 
-              // --- PAINEL DE FILTROS ---
+              // --- PAINEL DE FILTROS RETRÁTIL ---
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: ConstrainedBox(
@@ -607,46 +783,78 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                       color: const Color(0xFF3f5066),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Wrap(
-                      spacing: 15,
-                      runSpacing: 15,
-                      crossAxisAlignment: WrapCrossAlignment.end,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _buildDropdown(
-                            'Empresa:',
-                            _filtroEmpresa,
-                            ['Todas', ..._empresas], (v) {
-                          setState(
-                              () => _filtroEmpresa = v == 'Todas' ? '' : v!);
-                          _gerarRankingAsync();
-                        }),
-                        _buildDropdown(
-                            'Falha Relatada:',
-                            _filtroFalha,
-                            ['Todas', ..._falhas], (v) {
-                          setState(
-                              () => _filtroFalha = v == 'Todas' ? '' : v!);
-                          _gerarRankingAsync();
-                        }),
-                        _buildDateFilter('De (Abertura):', _dataInicio, (d) {
-                          setState(() => _dataInicio = d);
-                          _gerarRankingAsync();
-                        }),
-                        _buildDateFilter('Até (Abertura):', _dataFim, (d) {
-                          setState(() => _dataFim = d);
-                          _gerarRankingAsync();
-                        }),
-
-                        OutlinedButton(
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            side: const BorderSide(color: Colors.white54),
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 14, horizontal: 16),
+                        InkWell(
+                          onTap: () {
+                            setState(() {
+                              _mostrarFiltros = !_mostrarFiltros;
+                            });
+                          },
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Filtros de Busca',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16),
+                              ),
+                              Icon(
+                                _mostrarFiltros
+                                    ? Icons.keyboard_arrow_up
+                                    : Icons.keyboard_arrow_down,
+                                color: Colors.white,
+                              ),
+                            ],
                           ),
-                          onPressed: _limparFiltros,
-                          child: const Text('Limpar Filtros'),
                         ),
+                        if (_mostrarFiltros) ...[
+                          const SizedBox(height: 16),
+                          Wrap(
+                            spacing: 15,
+                            runSpacing: 15,
+                            crossAxisAlignment: WrapCrossAlignment.end,
+                            children: [
+                              _buildDropdown(
+                                  'Empresa:',
+                                  _filtroEmpresa,
+                                  ['Todas', ..._empresas], (v) {
+                                setState(
+                                    () => _filtroEmpresa = v == 'Todas' ? '' : v!);
+                                _gerarRankingAsync();
+                              }),
+                              _buildDropdown(
+                                  'Falha Relatada:',
+                                  _filtroFalha,
+                                  ['Todas', ..._falhas], (v) {
+                                setState(
+                                    () => _filtroFalha = v == 'Todas' ? '' : v!);
+                                _gerarRankingAsync();
+                              }),
+                              _buildDateFilter('De (Abertura):', _dataInicio, (d) {
+                                setState(() => _dataInicio = d);
+                                _gerarRankingAsync();
+                              }),
+                              _buildDateFilter('Até (Abertura):', _dataFim, (d) {
+                                setState(() => _dataFim = d);
+                                _gerarRankingAsync();
+                              }),
+                              OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  side: const BorderSide(color: Colors.white54),
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 14, horizontal: 16),
+                                ),
+                                onPressed: _limparFiltros,
+                                child: const Text('Limpar Filtros'),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -685,9 +893,12 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                                             const BorderRadius.vertical(
                                                 top: Radius.circular(10)),
                                       ),
-                                      child: Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
+                                      // WRAP ADICIONADO PARA CORRIGIR OVERFLOW DOS BOTÕES DE DOWNLOAD
+                                      child: Wrap(
+                                        alignment: WrapAlignment.spaceBetween,
+                                        crossAxisAlignment: WrapCrossAlignment.center,
+                                        spacing: 10,
+                                        runSpacing: 10,
                                         children: [
                                           const Text(
                                             'TOP 10 MAIS RECORRENTES',
@@ -696,7 +907,9 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                                                 color: Colors.blueGrey,
                                                 fontSize: 16),
                                           ),
-                                          Row(
+                                          Wrap(
+                                            spacing: 10,
+                                            runSpacing: 10,
                                             children: [
                                               ElevatedButton.icon(
                                                 style: ElevatedButton.styleFrom(
@@ -710,7 +923,7 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                                                     color: Colors.white,
                                                     size: 16),
                                                 label: const Text(
-                                                    'Baixar Planilha (XLSX)',
+                                                    'Baixar Planilha',
                                                     style: TextStyle(
                                                         color: Colors.white,
                                                         fontSize: 12,
@@ -719,7 +932,6 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                                                 onPressed: () =>
                                                     _baixarExcel(_rankingGerado),
                                               ),
-                                              const SizedBox(width: 10),
                                               ElevatedButton.icon(
                                                 style: ElevatedButton.styleFrom(
                                                     backgroundColor:
@@ -733,7 +945,7 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                                                     color: Colors.white,
                                                     size: 16),
                                                 label: const Text(
-                                                    'Baixar PDF Global',
+                                                    'Baixar PDF',
                                                     style: TextStyle(
                                                         color: Colors.white,
                                                         fontSize: 12,
@@ -955,8 +1167,8 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                                                                   'Ver Histórico Completo',
                                                               onPressed: () =>
                                                                   _abrirHistorico(
-                                                                      item['semaforo']
-                                                                          .toString(),
+                                                                      item['semaforo'].toString(),
+                                                                      item['endereco'].toString(),
                                                                       _todasOcorrenciasCache),
                                                             ),
                                                           ),
@@ -985,8 +1197,6 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
   }
 
   // --- WIDGETS AUXILIARES COM LARGURA PADRONIZADA (180px) ---
-
-  // CORREÇÃO: void Function(DateTime) no lugar de Function(DateTime)
   Widget _buildDateFilter(
       String label, DateTime? val, void Function(DateTime) onPicked) {
     return SizedBox(
@@ -1024,7 +1234,6 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
     );
   }
 
-  // CORREÇÃO: void Function(String?) no lugar de Function(String?)
   Widget _buildDropdown(String label, String value, List<String> items,
       void Function(String?) onChanged) {
     return SizedBox(

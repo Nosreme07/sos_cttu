@@ -8,8 +8,7 @@ import 'cadastros/tela_cadastro.dart';
 import 'ocorrencias/tela_ocorrencias.dart';
 import 'ocorrencias/tela_mapa_ocorrencias.dart';
 import 'dashboard/tela_dashboard.dart';
-import 'relatorios/tela_relatorios.dart';
-import 'relatorios/tela_mapa_relatorios.dart';
+import 'relatorios/tela_relatorios.dart'; // Importação correta do menu de relatórios
 
 // Importação do MENU REUTILIZÁVEL
 import '../widgets/menu_usuario.dart';
@@ -55,11 +54,11 @@ class TelaPrincipal extends StatelessWidget {
                   runSpacing: 24.0,
                   alignment: WrapAlignment.center,
                   children: [
-                    // BOTÃO DASHBOARD ATUALIZADO
+                    // BOTÃO DASHBOARD
                     _buildCardWithImage(
                       context,
                       'Dashboard',
-                      'assets/images/dashboard.png', // Certifique-se de que o nome da imagem está correto
+                      'assets/images/dashboard.png', 
                       () {
                         Navigator.push(
                           context,
@@ -70,23 +69,22 @@ class TelaPrincipal extends StatelessWidget {
                       },
                     ),
 
-                    // --- BOTÃO LISTA DE OCORRÊNCIAS ATUALIZADO ---
+                    // BOTÃO LISTA DE OCORRÊNCIAS
                     _buildCardWithImage(
                       context,
                       'Lista de\nOcorrências',
-                      'assets/images/ocorrencias.png', // Usando a imagem que você pediu
+                      'assets/images/ocorrencias.png', 
                       () {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) =>
-                                const ListaOcorrencias(), // Navegação ativada
+                            builder: (context) => const ListaOcorrencias(),
                           ),
                         );
                       },
                     ),
 
-                    // BOTÃO MAPA DE OCORRÊNCIAS ATUALIZADO
+                    // BOTÃO MAPA DE OCORRÊNCIAS
                     _buildCardWithImage(
                       context,
                       'Mapa de\nOcorrências',
@@ -101,7 +99,7 @@ class TelaPrincipal extends StatelessWidget {
                       },
                     ),
 
-                    // BOTÃO RELATÓRIOS ATUALIZADO
+                    // BOTÃO RELATÓRIOS (CORRIGIDO)
                     _buildCardWithImage(
                       context,
                       'Relatórios',
@@ -110,7 +108,7 @@ class TelaPrincipal extends StatelessWidget {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => const TelaRelatorios(),
+                            builder: (context) => const TelaRelatorioSemaforos(), // <-- Nome da classe corrigido aqui
                           ),
                         );
                       },
@@ -230,20 +228,6 @@ class TelaPrincipal extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildCardWithIcon(
-    BuildContext context,
-    String titulo,
-    IconData icone,
-    VoidCallback onTap,
-  ) {
-    return _buildBaseCard(
-      context,
-      titulo,
-      Icon(icone, size: 50, color: const Color(0xFF333A4A)),
-      onTap,
     );
   }
 
