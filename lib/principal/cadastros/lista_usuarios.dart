@@ -1,15 +1,17 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/services.dart';
 
-// Importações para Exportação (PDF e CSV)
+// Importações para Exportação (PDF e Excel)
+import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:csv/csv.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:excel/excel.dart' hide Border, TextSpan;
 
 import '../../widgets/menu_usuario.dart'; 
 
@@ -260,10 +262,18 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
             margin: const pw.EdgeInsets.only(top: 10.0),
             padding: const pw.EdgeInsets.only(top: 10.0),
             decoration: const pw.BoxDecoration(border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300))),
-            child: pw.Text(
-              'Relatório gerado pelo sistema de ocorrências semafóricas - SOS\nGerado em: $dataHora',
-              style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
-              textAlign: pw.TextAlign.center,
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  'Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - $dataHora',
+                  style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                ),
+                pw.Text(
+                  'Página ${context.pageNumber} de ${context.pagesCount}',
+                  style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                ),
+              ],
             ),
           );
         },
@@ -305,32 +315,44 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
     await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save(), name: 'relatorio_usuarios.pdf');
   }
 
-  Future<void> _exportarCSV(List<QueryDocumentSnapshot> docs) async {
+  // --- EXPORTAÇÃO EXCEL XLSX (Substituindo o CSV) ---
+  Future<void> _baixarExcel(List<QueryDocumentSnapshot> docs) async {
     final dataHora = _formatarDataHora();
-    List<List<dynamic>> rows = [];
+    var excel = Excel.createExcel();
+    Sheet sheetObject = excel['Usuários'];
+    excel.setDefaultSheet('Usuários');
 
     for (String perfil in _perfis) {
       final grupoDocs = docs.where((d) => (d.data() as Map<String, dynamic>)['perfil'] == perfil).toList();
       if (grupoDocs.isEmpty) continue;
       
-      rows.add(['--- PERFIL: ${perfil.toUpperCase()} ---']);
-      rows.add(['Nome', 'Usuário', 'E-mail']); 
+      sheetObject.appendRow(<CellValue>[TextCellValue("--- PERFIL: ${perfil.toUpperCase()} ---")]);
+      sheetObject.appendRow(<CellValue>[TextCellValue("Nome"), TextCellValue("Usuário"), TextCellValue("E-mail")]); 
+      
       for (var doc in grupoDocs) {
         var d = doc.data() as Map<String, dynamic>;
-        rows.add([d['nomeCompleto'], d['username'], d['email']]);
+        sheetObject.appendRow(<CellValue>[
+          TextCellValue((d['nomeCompleto'] ?? '').toString()),
+          TextCellValue((d['username'] ?? '').toString()),
+          TextCellValue((d['email'] ?? '').toString()),
+        ]);
       }
-      rows.add([]); 
+      sheetObject.appendRow(<CellValue>[TextCellValue("")]); 
     }
 
-    rows.add([]); 
-    rows.add(['Relatório gerado pelo sistema de ocorrências semafóricas - SOS']);
-    rows.add(['Gerado em:', dataHora]);
+    sheetObject.appendRow(<CellValue>[TextCellValue("Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - $dataHora")]);
 
-    String csv = const ListToCsvConverter().convert(rows);
-    final bytes = Uint8List.fromList(utf8.encode(csv));
-    final xFile = XFile.fromData(bytes, name: 'relatorio_usuarios.csv', mimeType: 'text/csv');
-    
-    await Share.shareXFiles([xFile], text: 'Segue o relatório de usuários do SOS_CTTU.');
+    var fileBytes = excel.encode();
+    if (fileBytes != null) {
+      final xfile = XFile.fromData(
+        Uint8List.fromList(fileBytes),
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        name: 'relatorio_usuarios.xlsx'
+      );
+      
+      await Share.shareXFiles([xfile], text: 'Segue o relatório de usuários do SOS.');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Planilha Excel baixada com sucesso!'), backgroundColor: Colors.green));
+    }
   }
 
   // Mostra usuários ao clicar nos cards do Dashboard
@@ -349,7 +371,7 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
             width: double.maxFinite,
             height: 400,
             child: filtrados.isEmpty 
-              ? const Center(child: Text('Nenhum usuário encontrado.'))
+              ? const Center(child: Text('Nenum usuário encontrado.'))
               : ListView.builder(
                   shrinkWrap: true,
                   itemCount: filtrados.length,
@@ -445,19 +467,24 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
                       
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                        child: TextField(
-                          controller: _buscaController,
-                          decoration: InputDecoration(
-                            hintText: 'Buscar usuário pelo nome...',
-                            prefixIcon: const Icon(Icons.search),
-                            fillColor: Colors.white.withValues(alpha: 0.95),
-                            filled: true,
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                            contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 800),
+                            child: TextField(
+                              controller: _buscaController,
+                              decoration: InputDecoration(
+                                hintText: 'Buscar usuário pelo nome...',
+                                prefixIcon: const Icon(Icons.search),
+                                fillColor: Colors.white.withValues(alpha: 0.95),
+                                filled: true,
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                                contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                              ),
+                              onChanged: (valor) {
+                                setState(() { _termoBusca = valor.toLowerCase(); });
+                              },
+                            ),
                           ),
-                          onChanged: (valor) {
-                            setState(() { _termoBusca = valor.toLowerCase(); });
-                          },
                         ),
                       ),
 
@@ -584,7 +611,7 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
                                         ),
                                         icon: const Icon(Icons.table_chart, color: Colors.white),
                                         label: const Text('Exportar Planilha', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                        onPressed: () => _exportarCSV(todosOsDocs),
+                                        onPressed: () => _baixarExcel(todosOsDocs),
                                       ),
                                     ),
                                   ],
@@ -606,6 +633,7 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
     );
   }
 
+  // --- Centraliza o conteúdo dentro dos cards do Dashboard ---
   Widget _buildDashboardCard(String titulo, int valor, Color cor, VoidCallback onTap) {
     return Card(
       color: Colors.white.withValues(alpha: 0.95),
@@ -617,7 +645,8 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
         child: Padding(
           padding: const EdgeInsets.all(12.0),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.center, // Alinha ao centro vertical
+            crossAxisAlignment: CrossAxisAlignment.center, // Alinha ao centro horizontal
             children: [
               Text(valor.toString(), style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: cor)),
               const SizedBox(height: 8),

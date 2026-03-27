@@ -1,14 +1,16 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/services.dart'; 
 
-// Importações novas para Exportação (PDF e CSV)
+// Importações para Exportação (PDF e Excel)
+import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:csv/csv.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:excel/excel.dart' hide Border, TextSpan;
 
 import '../../widgets/menu_usuario.dart'; 
 
@@ -109,6 +111,15 @@ class _ListaFalhasState extends State<ListaFalhas> with SingleTickerProviderStat
 
                         TextFormField(
                           controller: falhaController,
+                          textCapitalization: TextCapitalization.characters,
+                          inputFormatters: [
+                            TextInputFormatter.withFunction((oldValue, newValue) {
+                              return TextEditingValue(
+                                text: newValue.text.toUpperCase(),
+                                selection: newValue.selection,
+                              );
+                            })
+                          ],
                           decoration: const InputDecoration(labelText: 'Descrição da Falha *', border: OutlineInputBorder(), prefixIcon: Icon(Icons.warning_amber_rounded)),
                           validator: (value) => value == null || value.trim().isEmpty ? 'Obrigatório' : null,
                         ),
@@ -167,7 +178,7 @@ class _ListaFalhasState extends State<ListaFalhas> with SingleTickerProviderStat
                           },
                           child: estaCarregando 
                               ? const CircularProgressIndicator(color: Colors.white) 
-                              : Text(isEditando ? 'ATUALIZAR' : 'CADASTRAR', style: const TextStyle(color: Colors.white)),
+                              : Text(isEditando ? 'ATUALIZAR' : 'CADASTRAR', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         ),
                       ],
                     ),
@@ -182,8 +193,6 @@ class _ListaFalhasState extends State<ListaFalhas> with SingleTickerProviderStat
   }
 
   // --- FUNÇÕES DE EXPORTAÇÃO (AGORA COM RODAPÉ E SEPARAÇÃO) ---
-  
-  // Função auxiliar para formatar a data e hora (Ex: 24/05/2024 às 14:30)
   String _formatarDataHora() {
     final now = DateTime.now();
     final dia = now.day.toString().padLeft(2, '0');
@@ -204,19 +213,26 @@ class _ListaFalhasState extends State<ListaFalhas> with SingleTickerProviderStat
     final baixas = docs.where((d) => (d.data() as Map<String, dynamic>)['prioridade'] == 'Baixa').toList();
 
     pdf.addPage(
-      pw.MultiPage( // MultiPage permite criar várias páginas automaticamente se a lista for longa
+      pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        // Configurando o Rodapé em todas as páginas
         footer: (pw.Context context) {
           return pw.Container(
             alignment: pw.Alignment.center,
             margin: const pw.EdgeInsets.only(top: 10.0),
             padding: const pw.EdgeInsets.only(top: 10.0),
             decoration: const pw.BoxDecoration(border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300))),
-            child: pw.Text(
-              'Relatório gerado pelo sistema de ocorrências semafóricas - SOS\nGerado em: $dataHora',
-              style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
-              textAlign: pw.TextAlign.center,
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  'Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - $dataHora',
+                  style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                ),
+                pw.Text(
+                  'Página ${context.pageNumber} de ${context.pagesCount}',
+                  style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                ),
+              ],
             ),
           );
         },
@@ -228,7 +244,7 @@ class _ListaFalhasState extends State<ListaFalhas> with SingleTickerProviderStat
 
           // Função interna para desenhar a tabela de cada prioridade
           void adicionarGrupo(String titulo, List<QueryDocumentSnapshot> grupoDocs, PdfColor corHeader) {
-            if (grupoDocs.isEmpty) return; // Se não tiver falhas dessa prioridade, ignora
+            if (grupoDocs.isEmpty) return; 
             
             conteudo.add(pw.Text('Prioridade: $titulo', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: corHeader)));
             conteudo.add(pw.SizedBox(height: 8));
@@ -250,7 +266,6 @@ class _ListaFalhasState extends State<ListaFalhas> with SingleTickerProviderStat
             conteudo.add(pw.SizedBox(height: 20));
           }
 
-          // Adiciona os grupos na ordem de importância
           adicionarGrupo('Alta', altas, PdfColors.red700);
           adicionarGrupo('Média', medias, PdfColors.orange700);
           adicionarGrupo('Baixa', baixas, PdfColors.green700);
@@ -260,55 +275,56 @@ class _ListaFalhasState extends State<ListaFalhas> with SingleTickerProviderStat
       ),
     );
 
-    // Abre a tela padrão do sistema para imprimir ou salvar como PDF
     await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save(), name: 'relatorio_falhas.pdf');
   }
 
-  Future<void> _exportarCSV(List<QueryDocumentSnapshot> docs) async {
+  Future<void> _baixarExcel(List<QueryDocumentSnapshot> docs) async {
     final dataHora = _formatarDataHora();
-    List<List<dynamic>> rows = [];
+    var excel = Excel.createExcel();
+    Sheet sheetObject = excel['Falhas'];
+    excel.setDefaultSheet('Falhas');
 
-    // Separando as falhas por prioridade
     final altas = docs.where((d) => (d.data() as Map<String, dynamic>)['prioridade'] == 'Alta').toList();
     final medias = docs.where((d) => (d.data() as Map<String, dynamic>)['prioridade'] == 'Média').toList();
     final baixas = docs.where((d) => (d.data() as Map<String, dynamic>)['prioridade'] == 'Baixa').toList();
 
-    // Função interna para formatar o CSV por grupos
     void adicionarGrupo(String titulo, List<QueryDocumentSnapshot> grupoDocs) {
       if (grupoDocs.isEmpty) return;
-      rows.add(['--- PRIORIDADE ${titulo.toUpperCase()} ---']);
-      rows.add(['Falha', 'Prazo (minutos)']); // Cabeçalho do grupo
+      sheetObject.appendRow(<CellValue>[TextCellValue("--- PRIORIDADE ${titulo.toUpperCase()} ---")]);
+      sheetObject.appendRow(<CellValue>[TextCellValue("Falha"), TextCellValue("Prazo (minutos)")]);
+      
       for (var doc in grupoDocs) {
         var d = doc.data() as Map<String, dynamic>;
-        rows.add([d['falha'], d['prazo']]);
+        sheetObject.appendRow(<CellValue>[
+          TextCellValue((d['falha'] ?? '').toString()),
+          TextCellValue((d['prazo'] ?? '0').toString()),
+        ]);
       }
-      rows.add([]); // Linha em branco para separar os grupos
+      sheetObject.appendRow(<CellValue>[TextCellValue("")]); 
     }
 
-    // Montando as linhas da planilha
     adicionarGrupo('Alta', altas);
     adicionarGrupo('Média', medias);
     adicionarGrupo('Baixa', baixas);
 
-    // Adicionando o Rodapé no final da planilha
-    rows.add([]); // Mais uma linha em branco
-    rows.add(['Relatório gerado pelo sistema de ocorrências semafóricas - SOS']);
-    rows.add(['Gerado em:', dataHora]);
+    sheetObject.appendRow(<CellValue>[TextCellValue("Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - $dataHora")]);
 
-    // Converte a lista em uma string CSV
-    String csv = const ListToCsvConverter().convert(rows);
-    
-    // Converte a string para bytes e cria o arquivo para compartilhamento
-    final bytes = Uint8List.fromList(utf8.encode(csv));
-    final xFile = XFile.fromData(bytes, name: 'relatorio_falhas.csv', mimeType: 'text/csv');
-    
-    // Abre a tela de compartilhamento (WhatsApp, Salvar no Drive, etc)
-    await Share.shareXFiles([xFile], text: 'Segue o relatório de falhas agrupado por prioridade do SOS_CTTU.');
+    var fileBytes = excel.encode();
+    if (fileBytes != null) {
+      final xfile = XFile.fromData(
+        Uint8List.fromList(fileBytes),
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        name: 'relatorio_falhas.xlsx'
+      );
+      
+      await Share.shareXFiles([xfile], text: 'Segue o relatório de falhas agrupado por prioridade.');
+      
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Planilha Excel baixada com sucesso!'), backgroundColor: Colors.green));
+    }
   }
 
   // Modal para mostrar as falhas ao clicar nos cards do Dashboard
   void _mostrarFalhasDaPrioridade(String prioridade, List<QueryDocumentSnapshot> todosDocs) {
-    // Filtra apenas as falhas da prioridade clicada
     final filtrados = todosDocs.where((doc) {
       var d = doc.data() as Map<String, dynamic>;
       return d['prioridade'] == prioridade;
@@ -406,19 +422,24 @@ class _ListaFalhasState extends State<ListaFalhas> with SingleTickerProviderStat
                       
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                        child: TextField(
-                          controller: _buscaController,
-                          decoration: InputDecoration(
-                            hintText: 'Buscar falha por nome...',
-                            prefixIcon: const Icon(Icons.search),
-                            fillColor: Colors.white.withValues(alpha: 0.95),
-                            filled: true,
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                            contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 800),
+                            child: TextField(
+                              controller: _buscaController,
+                              decoration: InputDecoration(
+                                hintText: 'Buscar falha por nome...',
+                                prefixIcon: const Icon(Icons.search),
+                                fillColor: Colors.white.withValues(alpha: 0.95),
+                                filled: true,
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                                contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                              ),
+                              onChanged: (valor) {
+                                setState(() { _termoBusca = valor.toLowerCase(); });
+                              },
+                            ),
                           ),
-                          onChanged: (valor) {
-                            setState(() { _termoBusca = valor.toLowerCase(); });
-                          },
                         ),
                       ),
 
@@ -540,7 +561,7 @@ class _ListaFalhasState extends State<ListaFalhas> with SingleTickerProviderStat
                                         ),
                                         icon: const Icon(Icons.table_chart, color: Colors.white),
                                         label: const Text('Exportar Planilha', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                        onPressed: () => _exportarCSV(todosOsDocs),
+                                        onPressed: () => _baixarExcel(todosOsDocs),
                                       ),
                                     ),
                                   ],

@@ -5,12 +5,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart'; 
 import 'package:brasil_fields/brasil_fields.dart'; 
 
-// Importações para Exportação (PDF e CSV)
+// Importações para Exportação (PDF e Excel)
+import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:csv/csv.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:excel/excel.dart' hide Border, TextSpan;
 
 import '../../widgets/menu_usuario.dart';
 
@@ -101,6 +102,7 @@ class _ListaEmpresasState extends State<ListaEmpresas> {
 
                         TextFormField(
                           controller: nomeController,
+                          textCapitalization: TextCapitalization.characters,
                           decoration: const InputDecoration(labelText: 'Nome da Empresa *', border: OutlineInputBorder(), prefixIcon: Icon(Icons.business)),
                           validator: (value) => value == null || value.trim().isEmpty ? 'O nome da empresa é obrigatório' : null,
                         ),
@@ -116,6 +118,7 @@ class _ListaEmpresasState extends State<ListaEmpresas> {
 
                         TextFormField(
                           controller: enderecoController,
+                          textCapitalization: TextCapitalization.sentences,
                           decoration: const InputDecoration(labelText: 'Endereço', border: OutlineInputBorder(), prefixIcon: Icon(Icons.location_on)),
                         ),
                         const SizedBox(height: 12),
@@ -195,23 +198,32 @@ class _ListaEmpresasState extends State<ListaEmpresas> {
 
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: PdfPageFormat.a4.landscape, // Deixei em paisagem para caber mais colunas
+        pageFormat: PdfPageFormat.a4.landscape, 
         footer: (pw.Context context) {
-          return pw.Container(
-            alignment: pw.Alignment.center,
-            margin: const pw.EdgeInsets.only(top: 10.0),
-            padding: const pw.EdgeInsets.only(top: 10.0),
-            decoration: const pw.BoxDecoration(border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300))),
-            child: pw.Text(
-              'Relatório gerado pelo sistema de ocorrências semafóricas - SOS\nGerado em: $dataHora',
-              style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
-              textAlign: pw.TextAlign.center,
-            ),
+          return pw.Column(
+            mainAxisSize: pw.MainAxisSize.min,
+            children: [
+              pw.Divider(color: PdfColors.grey300),
+              pw.SizedBox(height: 5),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - $dataHora',
+                    style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
+                  ),
+                  pw.Text(
+                    'Página ${context.pageNumber} de ${context.pagesCount}',
+                    style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
+                  ),
+                ],
+              ),
+            ],
           );
         },
         build: (pw.Context context) {
           return [
-            pw.Text('Relatório de Empresas', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+            pw.Text('Relatório de Empresas Cadastradas', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
             pw.SizedBox(height: 20),
             pw.TableHelper.fromTextArray(
               context: context,
@@ -234,25 +246,42 @@ class _ListaEmpresasState extends State<ListaEmpresas> {
     await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save(), name: 'relatorio_empresas.pdf');
   }
 
-  Future<void> _exportarCSV(List<QueryDocumentSnapshot> docs) async {
-    final dataHora = _formatarDataHora();
-    List<List<dynamic>> rows = [];
+  Future<void> _baixarExcel(List<QueryDocumentSnapshot> docs) async {
+    var excel = Excel.createExcel();
+    Sheet sheetObject = excel['Empresas'];
+    excel.setDefaultSheet('Empresas');
 
-    rows.add(['Nome da Empresa', 'CNPJ', 'Contato', 'Endereço']); 
+    sheetObject.appendRow(<CellValue>[TextCellValue("Relatório de Empresas Cadastradas")]);
+    sheetObject.appendRow(<CellValue>[TextCellValue("Gerado em: ${_formatarDataHora()}")]);
+    sheetObject.appendRow(<CellValue>[TextCellValue("")]); 
+
+    sheetObject.appendRow(<CellValue>[
+      TextCellValue("Nome da Empresa"),
+      TextCellValue("CNPJ"),
+      TextCellValue("Contato"),
+      TextCellValue("Endereço"),
+    ]);
+
     for (var doc in docs) {
       var d = doc.data() as Map<String, dynamic>;
-      rows.add([d['nome'], d['cnpj'], d['contato'], d['endereco']]);
+      sheetObject.appendRow(<CellValue>[
+        TextCellValue(d['nome']?.toString() ?? ''),
+        TextCellValue(d['cnpj']?.toString() ?? ''),
+        TextCellValue(d['contato']?.toString() ?? ''),
+        TextCellValue(d['endereco']?.toString() ?? ''),
+      ]);
     }
 
-    rows.add([]); 
-    rows.add(['Relatório gerado pelo sistema de ocorrências semafóricas - SOS']);
-    rows.add(['Gerado em:', dataHora]);
-
-    String csv = const ListToCsvConverter().convert(rows);
-    final bytes = Uint8List.fromList(utf8.encode(csv));
-    final xFile = XFile.fromData(bytes, name: 'relatorio_empresas.csv', mimeType: 'text/csv');
-    
-    await Share.shareXFiles([xFile], text: 'Segue o relatório de empresas do SOS_CTTU.');
+    var fileBytes = excel.encode();
+    if (fileBytes != null) {
+      final xfile = XFile.fromData(
+        Uint8List.fromList(fileBytes),
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        name: 'relatorio_empresas.xlsx'
+      );
+      await Share.shareXFiles([xfile], text: 'Relatório de Empresas');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Planilha Excel baixada com sucesso!'), backgroundColor: Colors.green));
+    }
   }
 
   @override
@@ -348,7 +377,7 @@ class _ListaEmpresasState extends State<ListaEmpresas> {
                                 ),
                                 icon: const Icon(Icons.table_chart, color: Colors.white, size: 18),
                                 label: const Text('Exportar Planilha', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                                onPressed: () => _exportarCSV(todosOsDocs),
+                                onPressed: () => _baixarExcel(todosOsDocs),
                               ),
                             ),
                           ],

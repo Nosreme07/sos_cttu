@@ -1,15 +1,17 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
 import 'package:brasil_fields/brasil_fields.dart'; // Para a máscara da Placa
 
-// Importações para Exportação (PDF e CSV)
+// Importações para Exportação (PDF e Excel)
+import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:csv/csv.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:excel/excel.dart' hide Border, TextSpan;
 
 import '../../widgets/menu_usuario.dart';
 
@@ -34,6 +36,9 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
   final TextEditingController _buscaController = TextEditingController();
   String _termoBusca = '';
 
+  // Lista de empresas carregadas do banco para o Autocompletar
+  List<String> _empresasOptions = [];
+
   @override
   void initState() {
     super.initState();
@@ -41,6 +46,7 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
     _tabController.addListener(() {
       setState(() {}); 
     });
+    _carregarEmpresas(); // Carrega as empresas ao abrir a tela
   }
 
   @override
@@ -48,6 +54,36 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
     _tabController.dispose();
     _buscaController.dispose();
     super.dispose();
+  }
+
+  // --- CARREGA TODAS AS EMPRESAS DO BANCO DE DADOS ---
+  Future<void> _carregarEmpresas() async {
+    try {
+      final resEmpresas = await FirebaseFirestore.instance.collection('empresas').get();
+      final resVeiculos = await FirebaseFirestore.instance.collection('veiculos').get();
+
+      Set<String> empSet = {};
+      
+      // Busca do cadastro oficial de empresas (se existir)
+      for (var doc in resEmpresas.docs) {
+        String emp = (doc.data()['nome'] ?? doc.data()['empresa'] ?? doc.id).toString().toUpperCase();
+        if (emp.isNotEmpty) empSet.add(emp);
+      }
+      
+      // Busca também das empresas que já estão nos veículos (Garante que nenhuma fique de fora)
+      for (var doc in resVeiculos.docs) {
+        String emp = (doc.data()['empresa'] ?? '').toString().toUpperCase();
+        if (emp.isNotEmpty) empSet.add(emp);
+      }
+
+      if (mounted) {
+        setState(() {
+          _empresasOptions = empSet.toList()..sort();
+        });
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar empresas: $e');
+    }
   }
 
   // --- Função para Excluir Veículo ---
@@ -84,8 +120,15 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
     final marcaController = TextEditingController(text: dadosAtuais?['marca'] ?? '');
     final modeloController = TextEditingController(text: dadosAtuais?['modelo'] ?? '');
     final placaController = TextEditingController(text: dadosAtuais?['placa'] ?? '');
-    final empresaController = TextEditingController(text: dadosAtuais?['empresa'] ?? '');
     String? tipoSelecionado = dadosAtuais?['tipo'];
+
+    String empresaAtual = dadosAtuais?['empresa'] ?? '';
+    final empresaController = TextEditingController(text: empresaAtual);
+
+    // Garante que a empresa atual do veículo apareça na lista de opções (se ele for de uma empresa que foi apagada)
+    if (empresaAtual.isNotEmpty && !_empresasOptions.contains(empresaAtual)) {
+      _empresasOptions.add(empresaAtual);
+    }
 
     bool estaCarregando = false;
     bool isEditando = docId != null;
@@ -139,19 +182,31 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
 
                         TextFormField(
                           controller: marcaController,
+                          textCapitalization: TextCapitalization.characters,
                           decoration: const InputDecoration(labelText: 'Marca', border: OutlineInputBorder(), prefixIcon: Icon(Icons.branding_watermark)),
                         ),
                         const SizedBox(height: 12),
 
                         TextFormField(
                           controller: modeloController,
+                          textCapitalization: TextCapitalization.characters,
                           decoration: const InputDecoration(labelText: 'Modelo', border: OutlineInputBorder(), prefixIcon: Icon(Icons.car_repair)),
                         ),
                         const SizedBox(height: 12),
 
-                        TextFormField(
+                        // NOVO CAMPO DE EMPRESA COM LISTAGEM E AUTOCOMPLETAR
+                        DropdownMenu<String>(
+                          expandedInsets: EdgeInsets.zero,
                           controller: empresaController,
-                          decoration: const InputDecoration(labelText: 'Empresa', border: OutlineInputBorder(), prefixIcon: Icon(Icons.factory)),
+                          enableFilter: true,
+                          enableSearch: true,
+                          label: const Text('Empresa'),
+                          leadingIcon: const Icon(Icons.factory),
+                          inputDecorationTheme: const InputDecorationTheme(
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                          ),
+                          dropdownMenuEntries: _empresasOptions.map((e) => DropdownMenuEntry(value: e, label: e)).toList(),
                         ),
                         const SizedBox(height: 24),
 
@@ -183,6 +238,10 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
                                   if (mounted) Navigator.pop(context);
                                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Criado com sucesso!'), backgroundColor: Colors.green));
                                 }
+
+                                // Recarrega as empresas caso o usuário tenha digitado uma nova
+                                _carregarEmpresas();
+
                               } catch (e) {
                                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red));
                               } finally {
@@ -192,7 +251,7 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
                           },
                           child: estaCarregando 
                               ? const CircularProgressIndicator(color: Colors.white) 
-                              : Text(isEditando ? 'ATUALIZAR' : 'CADASTRAR', style: const TextStyle(color: Colors.white)),
+                              : Text(isEditando ? 'ATUALIZAR' : 'CADASTRAR', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         ),
                       ],
                     ),
@@ -230,10 +289,18 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
             margin: const pw.EdgeInsets.only(top: 10.0),
             padding: const pw.EdgeInsets.only(top: 10.0),
             decoration: const pw.BoxDecoration(border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300))),
-            child: pw.Text(
-              'Relatório gerado pelo sistema de ocorrências semafóricas - SOS\nGerado em: $dataHora',
-              style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
-              textAlign: pw.TextAlign.center,
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  'Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - $dataHora',
+                  style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                ),
+                pw.Text(
+                  'Página ${context.pageNumber} de ${context.pagesCount}',
+                  style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                ),
+              ],
             ),
           );
         },
@@ -276,32 +343,45 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
     await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save(), name: 'relatorio_veiculos.pdf');
   }
 
-  Future<void> _exportarCSV(List<QueryDocumentSnapshot> docs) async {
+  // --- EXPORTAÇÃO EXCEL XLSX (Substituindo o CSV) ---
+  Future<void> _baixarExcel(List<QueryDocumentSnapshot> docs) async {
     final dataHora = _formatarDataHora();
-    List<List<dynamic>> rows = [];
+    var excel = Excel.createExcel();
+    Sheet sheetObject = excel['Veículos'];
+    excel.setDefaultSheet('Veículos');
 
     for (String tipo in _tiposVeiculo) {
       final grupoDocs = docs.where((d) => (d.data() as Map<String, dynamic>)['tipo'] == tipo).toList();
       if (grupoDocs.isEmpty) continue;
       
-      rows.add(['--- TIPO: ${tipo.toUpperCase()} ---']);
-      rows.add(['Placa', 'Marca', 'Modelo', 'Empresa']); 
+      sheetObject.appendRow(<CellValue>[TextCellValue("--- TIPO: ${tipo.toUpperCase()} ---")]);
+      sheetObject.appendRow(<CellValue>[TextCellValue("Placa"), TextCellValue("Marca"), TextCellValue("Modelo"), TextCellValue("Empresa")]); 
+      
       for (var doc in grupoDocs) {
         var d = doc.data() as Map<String, dynamic>;
-        rows.add([d['placa'], d['marca'], d['modelo'], d['empresa']]);
+        sheetObject.appendRow(<CellValue>[
+          TextCellValue((d['placa'] ?? '').toString()),
+          TextCellValue((d['marca'] ?? '').toString()),
+          TextCellValue((d['modelo'] ?? '').toString()),
+          TextCellValue((d['empresa'] ?? '').toString()),
+        ]);
       }
-      rows.add([]); 
+      sheetObject.appendRow(<CellValue>[TextCellValue("")]); 
     }
 
-    rows.add([]); 
-    rows.add(['Relatório gerado pelo sistema de ocorrências semafóricas - SOS']);
-    rows.add(['Gerado em:', dataHora]);
+    sheetObject.appendRow(<CellValue>[TextCellValue("Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - $dataHora")]);
 
-    String csv = const ListToCsvConverter().convert(rows);
-    final bytes = Uint8List.fromList(utf8.encode(csv));
-    final xFile = XFile.fromData(bytes, name: 'relatorio_veiculos.csv', mimeType: 'text/csv');
-    
-    await Share.shareXFiles([xFile], text: 'Segue o relatório de veículos do SOS_CTTU.');
+    var fileBytes = excel.encode();
+    if (fileBytes != null) {
+      final xfile = XFile.fromData(
+        Uint8List.fromList(fileBytes),
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        name: 'relatorio_veiculos.xlsx'
+      );
+      
+      await Share.shareXFiles([xfile], text: 'Segue o relatório de veículos do SOS.');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Planilha Excel baixada com sucesso!'), backgroundColor: Colors.green));
+    }
   }
 
   // Mostra veículos ao clicar nos cards do Dashboard
@@ -415,19 +495,24 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
                       
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                        child: TextField(
-                          controller: _buscaController,
-                          decoration: InputDecoration(
-                            hintText: 'Buscar pela placa ou marca...',
-                            prefixIcon: const Icon(Icons.search),
-                            fillColor: Colors.white.withValues(alpha: 0.95),
-                            filled: true,
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                            contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 800),
+                            child: TextField(
+                              controller: _buscaController,
+                              decoration: InputDecoration(
+                                hintText: 'Buscar pela placa ou marca...',
+                                prefixIcon: const Icon(Icons.search),
+                                fillColor: Colors.white.withValues(alpha: 0.95),
+                                filled: true,
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                                contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                              ),
+                              onChanged: (valor) {
+                                setState(() { _termoBusca = valor.toLowerCase(); });
+                              },
+                            ),
                           ),
-                          onChanged: (valor) {
-                            setState(() { _termoBusca = valor.toLowerCase(); });
-                          },
                         ),
                       ),
 
@@ -556,7 +641,7 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
                                         ),
                                         icon: const Icon(Icons.table_chart, color: Colors.white),
                                         label: const Text('Exportar Planilha', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                        onPressed: () => _exportarCSV(todosOsDocs),
+                                        onPressed: () => _baixarExcel(todosOsDocs),
                                       ),
                                     ),
                                   ],
@@ -578,6 +663,7 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
     );
   }
 
+  // --- Centraliza o conteúdo dos cards do Dashboard ---
   Widget _buildDashboardCard(String titulo, int valor, Color cor, VoidCallback onTap) {
     return Card(
       color: Colors.white.withValues(alpha: 0.95),
@@ -589,7 +675,8 @@ class _ListaVeiculosState extends State<ListaVeiculos> with SingleTickerProvider
         child: Padding(
           padding: const EdgeInsets.all(12.0),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.center, // Centraliza verticalmente
+            crossAxisAlignment: CrossAxisAlignment.center, // Centraliza horizontalmente
             children: [
               Text(valor.toString(), style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: cor)),
               const SizedBox(height: 8),

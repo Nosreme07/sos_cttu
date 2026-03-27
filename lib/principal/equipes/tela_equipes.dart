@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
-// VERIFIQUE SE ESTE CAMINHO ESTÁ CORRETO NO SEU PROJETO
+// Importações para PDF
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+
 import '../../widgets/menu_usuario.dart'; 
 
 class TelaEquipes extends StatefulWidget {
@@ -43,6 +47,157 @@ class _TelaEquipesState extends State<TelaEquipes> with SingleTickerProviderStat
     return DateFormat('dd/MM/yy HH:mm').format(dt);
   }
 
+  String _formatarDataHoraStr() {
+    final now = DateTime.now();
+    final dia = now.day.toString().padLeft(2, '0');
+    final mes = now.month.toString().padLeft(2, '0');
+    final ano = now.year.toString();
+    final hora = now.hour.toString().padLeft(2, '0');
+    final min = now.minute.toString().padLeft(2, '0');
+    return '$dia/$mes/$ano às $hora:$min';
+  }
+
+  // =========================================================================
+  // MOTOR DE CRUZAMENTO: QUAIS OCORRÊNCIAS ESTA EQUIPE ATENDEU?
+  // =========================================================================
+  List<Map<String, dynamic>> _obterOcorrenciasDaEquipe(Map<String, dynamic> eqData, List<QueryDocumentSnapshot> todasOcorrencias) {
+    String placa = (eqData['placa'] ?? '').toString().toUpperCase();
+    String intsStr = (eqData['integrantes_str'] ?? '').toString().toUpperCase();
+    String nomeLider = intsStr.split(',').first.trim();
+
+    Timestamp? tsInicio = eqData['data_inicio'];
+    Timestamp? tsFim = eqData['data_fim'];
+
+    DateTime dtInicio = tsInicio != null
+        ? tsInicio.toDate().subtract(const Duration(minutes: 10))
+        : DateTime.fromMillisecondsSinceEpoch(0);
+    DateTime dtFim = tsFim != null
+        ? tsFim.toDate().add(const Duration(minutes: 10))
+        : DateTime.now().add(const Duration(days: 1));
+
+    List<Map<String, dynamic>> atendidas = [];
+
+    for (var doc in todasOcorrencias) {
+      var oc = doc.data() as Map<String, dynamic>;
+      String equipeResp = (oc['equipe_responsavel'] ?? oc['equipe_atrelada'] ?? '').toString().toUpperCase();
+      String placaResp = (oc['placa_veiculo'] ?? '').toString().toUpperCase();
+
+      bool bateuNome = nomeLider.isNotEmpty && equipeResp.contains(nomeLider);
+      bool bateuPlaca = placa.isNotEmpty && (placaResp == placa || equipeResp.contains(placa));
+
+      if (bateuNome || bateuPlaca) {
+        Timestamp? tsAtend = oc['data_atendimento'] ?? oc['data_de_abertura'];
+        if (tsAtend != null) {
+          DateTime dtAtend = tsAtend.toDate();
+          if (dtAtend.isAfter(dtInicio) && dtAtend.isBefore(dtFim)) {
+            atendidas.add(oc);
+          }
+        }
+      }
+    }
+    return atendidas;
+  }
+
+  // =========================================================================
+  // GERAR PDF INDIVIDUAL DO TURNO DA EQUIPE
+  // =========================================================================
+  Future<void> _exportarPdfIndividual(Map<String, dynamic> data, List<Map<String, dynamic>> ocorrencias) async {
+    final pdf = pw.Document();
+    String placa = data['placa'] ?? 'S_PLACA';
+    final dataHora = _formatarDataHoraStr();
+
+    pdf.addPage(
+      pw.MultiPage(
+        margin: const pw.EdgeInsets.all(40),
+        footer: (pw.Context context) {
+          return pw.Column(
+            mainAxisSize: pw.MainAxisSize.min,
+            children: [
+              pw.Divider(color: PdfColors.grey300),
+              pw.SizedBox(height: 5),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - $dataHora',
+                    style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
+                  ),
+                  pw.Text(
+                    'Página ${context.pageNumber} de ${context.pagesCount}',
+                    style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+        build: (pw.Context context) => [
+          pw.Text('RELATÓRIO DE TURNO DA EQUIPE', style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold, color: PdfColors.red800)),
+          pw.Divider(),
+          pw.SizedBox(height: 10),
+          pw.Text('Veículo / Placa: $placa (${data['tipo'] ?? data['tipo_veiculo'] ?? '-'})', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+          pw.Text('Empresa Responsável: ${data['empresa'] ?? '-'}'),
+          pw.Text('Status do Turno: ${(data['status'] ?? '-').toString().toUpperCase()}'),
+          pw.SizedBox(height: 15),
+          
+          pw.Text('DADOS DE TEMPO E KM', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey)),
+          pw.Text('Início do Turno: ${_formatarData(data['data_inicio'])}'),
+          pw.Text('Fim do Turno: ${_formatarData(data['data_fim'])}'),
+          pw.Text('KM Inicial: ${data['km_inicial'] ?? 0} | KM Final: ${data['km_final'] ?? '-'} | Rodado: ${data['km_rodado'] ?? 0} km'),
+          pw.SizedBox(height: 15),
+          
+          pw.Text('INTEGRANTES', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey)),
+          pw.Text(data['integrantes_str'] ?? '-'),
+          pw.SizedBox(height: 15),
+          
+          pw.Text('OBSERVAÇÕES DO TURNO', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey)),
+          pw.Text(data['observacoes'] ?? 'Nenhuma observação registrada.'),
+          pw.SizedBox(height: 20),
+
+          pw.Text('OCORRÊNCIAS ATENDIDAS NESTE TURNO (${ocorrencias.length})', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColors.blue)),
+          pw.SizedBox(height: 10),
+
+          if (ocorrencias.isEmpty) 
+            pw.Text('Nenhum atendimento registrado para esta equipe neste período.', style: const pw.TextStyle(color: PdfColors.grey)),
+
+          ...ocorrencias.map((oc) {
+            return pw.Container(
+              margin: const pw.EdgeInsets.only(bottom: 8),
+              padding: const pw.EdgeInsets.all(8),
+              decoration: const pw.BoxDecoration(color: PdfColors.grey100),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('Semáforo: ${oc['semaforo']} - ${oc['endereco']}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
+                  pw.Text('Nº Ocorrência: ${oc['numero_da_ocorrencia'] ?? oc['id'] ?? 'S/N'}', style: const pw.TextStyle(fontSize: 10)),
+                  pw.Text('Falha Relatada: ${oc['tipo_da_falha'] ?? '---'}', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey800)),
+                  pw.Text('Falha Encontrada: ${oc['falha_aparente_final'] ?? '---'}', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey800)),
+                  pw.Text('Status da Ocorrência: ${(oc['status'] ?? '').toString().toUpperCase()}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                ]
+              )
+            );
+          }),
+
+          pw.SizedBox(height: 60),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.center,
+            children: [
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Container(width: 250, height: 1, color: PdfColors.black),
+                  pw.SizedBox(height: 5),
+                  pw.Text('Assinatura do Responsável da Equipe', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                ]
+              )
+            ]
+          )
+        ],
+      ),
+    );
+    await Printing.layoutPdf(onLayout: (format) async => pdf.save(), name: 'Turno_Equipe_$placa.pdf');
+  }
+
   // =========================================================================
   // "CÉREBRO" DO DESPACHO: Cruza os dados para saber quem está livre
   // =========================================================================
@@ -78,7 +233,6 @@ class _TelaEquipesState extends State<TelaEquipes> with SingleTickerProviderStat
 
     final integrantes = await FirebaseFirestore.instance.collection('integrantes').get();
     
-    // --- CORREÇÃO: USANDO SET PARA EVITAR NOMES DUPLICADOS NO BANCO ---
     Set<String> integrantesLivresSet = {}; 
     
     for (var doc in integrantes.docs) {
@@ -126,7 +280,6 @@ class _TelaEquipesState extends State<TelaEquipes> with SingleTickerProviderStat
     
     Map<String, Map<String, dynamic>> veiculosLivresData = recursosLivres['veiculosData'];
     
-    // --- CORREÇÃO: GARANTINDO QUE AS PLACAS SÃO ÚNICAS ---
     List<String> veiculosPlacas = veiculosLivresData.keys.toSet().toList()..sort();
 
     String? placaSelecionada = dadosAtuais?['placa'];
@@ -151,10 +304,9 @@ class _TelaEquipesState extends State<TelaEquipes> with SingleTickerProviderStat
         return StatefulBuilder(
           builder: (context, setStateModal) {
 
-            // Remove quem já foi selecionado E garante que a lista final é única
             List<String> opcoesIntegrantes = (recursosLivres['integrantes'] as List<String>)
                 .where((nome) => !equipeSelecionada.contains(nome))
-                .toSet() // Proteção extra contra duplicatas
+                .toSet()
                 .toList();
 
             return Container(
@@ -215,7 +367,6 @@ class _TelaEquipesState extends State<TelaEquipes> with SingleTickerProviderStat
                                     children: [
                                       Expanded(
                                         child: DropdownButtonFormField<String>(
-                                          // 👇 A MÁGICA QUE RESOLVE A TELA VERMELHA 👇
                                           key: ValueKey(equipeSelecionada.join('-')), 
                                           decoration: const InputDecoration(labelText: 'Adicionar Integrante Livre', border: OutlineInputBorder(), isDense: true),
                                           value: null, 
@@ -386,7 +537,7 @@ class _TelaEquipesState extends State<TelaEquipes> with SingleTickerProviderStat
   }
 
   // --- COMPONENTE: GRID DE EQUIPES ---
-  Widget _buildGrid(List<QueryDocumentSnapshot> lista, bool isAtivo) {
+  Widget _buildGrid(List<QueryDocumentSnapshot> lista, bool isAtivo, List<QueryDocumentSnapshot> ocorrenciasDocs) {
     if (lista.isEmpty) {
       return Center(
         child: Text(
@@ -403,7 +554,7 @@ class _TelaEquipesState extends State<TelaEquipes> with SingleTickerProviderStat
           padding: const EdgeInsets.only(bottom: 80, left: 16, right: 16, top: 16),
           gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
             maxCrossAxisExtent: 380, 
-            mainAxisExtent: 270,
+            mainAxisExtent: 300, // Aumentei a altura para caber os semáforos
             crossAxisSpacing: 16,
             mainAxisSpacing: 16,
           ),
@@ -423,6 +574,14 @@ class _TelaEquipesState extends State<TelaEquipes> with SingleTickerProviderStat
             String empresa = data['empresa'] ?? '';
             
             String headerTextoCarro = tipo.isNotEmpty ? '$placa ($tipo)' : placa;
+
+            // BUSCA INTELIGENTE DE OCORRÊNCIAS/SEMÁFOROS
+            var ocorrenciasDaEquipe = _obterOcorrenciasDaEquipe(data, ocorrenciasDocs);
+            List<String> semaforosAtendidos = ocorrenciasDaEquipe
+                .map((o) => (o['semaforo'] ?? '').toString())
+                .toSet()
+                .where((s) => s.isNotEmpty)
+                .toList();
 
             return Card(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -489,11 +648,29 @@ class _TelaEquipesState extends State<TelaEquipes> with SingleTickerProviderStat
                           ),
                           const Spacer(),
 
+                          // BOX DE SEMÁFOROS
                           Container(
                             width: double.infinity,
                             padding: const EdgeInsets.all(6),
                             decoration: BoxDecoration(color: Colors.grey.shade100, border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(6)),
-                            child: const Text('Tarefas atribuídas aparecerão aqui no próximo módulo.', style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: Colors.blueGrey)),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('🚦 Semáforos Atendidos:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                                const SizedBox(height: 4),
+                                semaforosAtendidos.isEmpty 
+                                  ? const Text('Nenhum semáforo vinculado no momento.', style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: Colors.grey))
+                                  : Wrap(
+                                      spacing: 4,
+                                      runSpacing: 4,
+                                      children: semaforosAtendidos.map((s) => Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.blue.shade200)),
+                                        child: Text(s, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue.shade800)),
+                                      )).toList(),
+                                    ),
+                              ],
+                            ),
                           )
                         ],
                       ),
@@ -522,9 +699,7 @@ class _TelaEquipesState extends State<TelaEquipes> with SingleTickerProviderStat
                           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF34495e), padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
                           icon: const Icon(Icons.picture_as_pdf, color: Colors.white, size: 14),
                           label: const Text('Exportar PDF', style: TextStyle(color: Colors.white, fontSize: 11)),
-                          onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Geração de PDF da equipe será ativada em breve.')));
-                          },
+                          onPressed: () => _exportarPdfIndividual(data, ocorrenciasDaEquipe),
                         )
                       ],
                     ),
@@ -612,33 +787,42 @@ class _TelaEquipesState extends State<TelaEquipes> with SingleTickerProviderStat
               ),
 
               Expanded(
+                // Duplo StreamBuilder para carregar as Equipes e as Ocorrências simultaneamente
                 child: StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance.collection('equipes').orderBy('data_inicio', descending: true).snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: Colors.white));
-                    if (snapshot.hasError) return const Center(child: Text('Erro ao carregar dados.', style: TextStyle(color: Colors.white)));
+                  builder: (context, snapshotEquipes) {
+                    if (snapshotEquipes.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: Colors.white));
+                    if (snapshotEquipes.hasError) return const Center(child: Text('Erro ao carregar equipes.', style: TextStyle(color: Colors.white)));
                     
-                    final docs = snapshot.data?.docs ?? [];
-                    
-                    final filtrados = docs.where((doc) {
-                      var d = doc.data() as Map<String, dynamic>;
-                      String placa = (d['placa'] ?? '').toString().toLowerCase();
-                      String ints = (d['integrantes_str'] ?? '').toString().toLowerCase();
+                    return StreamBuilder<QuerySnapshot>(
+                      stream: FirebaseFirestore.instance.collection('Gerenciamento_ocorrencias').snapshots(),
+                      builder: (context, snapshotOcorrencias) {
+                        if (snapshotOcorrencias.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: Colors.green));
+                        
+                        final docsEquipes = snapshotEquipes.data?.docs ?? [];
+                        final docsOcorrencias = snapshotOcorrencias.data?.docs ?? [];
+                        
+                        final filtrados = docsEquipes.where((doc) {
+                          var d = doc.data() as Map<String, dynamic>;
+                          String placa = (d['placa'] ?? '').toString().toLowerCase();
+                          String ints = (d['integrantes_str'] ?? '').toString().toLowerCase();
 
-                      if (_termoPlaca.isNotEmpty && !placa.contains(_termoPlaca)) return false;
-                      if (_termoIntegrante.isNotEmpty && !ints.contains(_termoIntegrante)) return false;
-                      return true;
-                    }).toList();
+                          if (_termoPlaca.isNotEmpty && !placa.contains(_termoPlaca)) return false;
+                          if (_termoIntegrante.isNotEmpty && !ints.contains(_termoIntegrante)) return false;
+                          return true;
+                        }).toList();
 
-                    final equipesAtivas = filtrados.where((d) => (d.data() as Map<String, dynamic>)['status'] == 'ativo').toList();
-                    final equipesFinalizadas = filtrados.where((d) => (d.data() as Map<String, dynamic>)['status'] == 'finalizado').toList();
+                        final equipesAtivas = filtrados.where((d) => (d.data() as Map<String, dynamic>)['status'] == 'ativo').toList();
+                        final equipesFinalizadas = filtrados.where((d) => (d.data() as Map<String, dynamic>)['status'] == 'finalizado').toList();
 
-                    return TabBarView(
-                      controller: _tabController,
-                      children: [
-                        _buildGrid(equipesAtivas, true),
-                        _buildGrid(equipesFinalizadas, false),
-                      ],
+                        return TabBarView(
+                          controller: _tabController,
+                          children: [
+                            _buildGrid(equipesAtivas, true, docsOcorrencias),
+                            _buildGrid(equipesFinalizadas, false, docsOcorrencias),
+                          ],
+                        );
+                      }
                     );
                   },
                 ),

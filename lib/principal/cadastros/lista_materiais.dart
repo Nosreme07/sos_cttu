@@ -1,16 +1,29 @@
 import 'dart:convert';
-import 'dart:typed_data'; // Necessário para o Uint8List do CSV
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/services.dart';
 
-// Importações para Exportação (PDF e CSV)
+// Importações para Exportação (PDF e Excel)
+import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:csv/csv.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:excel/excel.dart' hide Border, TextSpan;
 
 import '../../widgets/menu_usuario.dart'; 
+
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    return TextEditingValue(
+      text: newValue.text.toUpperCase(),
+      selection: newValue.selection,
+    );
+  }
+}
 
 class ListaMateriais extends StatefulWidget {
   const ListaMateriais({super.key});
@@ -107,6 +120,8 @@ class _ListaMateriaisState extends State<ListaMateriais> {
 
                         TextFormField(
                           controller: nomeController,
+                          textCapitalization: TextCapitalization.characters,
+                          inputFormatters: [UpperCaseTextFormatter()],
                           decoration: const InputDecoration(labelText: 'Descrição do Material *', border: OutlineInputBorder(), prefixIcon: Icon(Icons.build)),
                           validator: (value) => value == null || value.trim().isEmpty ? 'Obrigatório' : null,
                         ),
@@ -155,7 +170,7 @@ class _ListaMateriaisState extends State<ListaMateriais> {
                           },
                           child: estaCarregando 
                               ? const CircularProgressIndicator(color: Colors.white) 
-                              : Text(isEditando ? 'ATUALIZAR' : 'CADASTRAR', style: const TextStyle(color: Colors.white)),
+                              : Text(isEditando ? 'ATUALIZAR' : 'CADASTRAR', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         ),
                       ],
                     ),
@@ -193,16 +208,24 @@ class _ListaMateriaisState extends State<ListaMateriais> {
             margin: const pw.EdgeInsets.only(top: 10.0),
             padding: const pw.EdgeInsets.only(top: 10.0),
             decoration: const pw.BoxDecoration(border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300))),
-            child: pw.Text(
-              'Relatório gerado pelo sistema de ocorrências semafóricas - SOS\nGerado em: $dataHora',
-              style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
-              textAlign: pw.TextAlign.center,
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  'Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - $dataHora',
+                  style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                ),
+                pw.Text(
+                  'Página ${context.pageNumber} de ${context.pagesCount}',
+                  style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                ),
+              ],
             ),
           );
         },
         build: (pw.Context context) {
           return [
-            pw.Text('Relatório de Materiais', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+            pw.Text('Relatório de Materiais Cadastrados', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
             pw.SizedBox(height: 20),
             pw.TableHelper.fromTextArray(
               context: context,
@@ -225,25 +248,41 @@ class _ListaMateriaisState extends State<ListaMateriais> {
     await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save(), name: 'relatorio_materiais.pdf');
   }
 
-  Future<void> _exportarCSV(List<QueryDocumentSnapshot> docs) async {
+  Future<void> _baixarExcel(List<QueryDocumentSnapshot> docs) async {
     final dataHora = _formatarDataHora();
-    List<List<dynamic>> rows = [];
+    var excel = Excel.createExcel();
+    Sheet sheetObject = excel['Materiais'];
+    excel.setDefaultSheet('Materiais');
 
-    rows.add(['Descrição do Material', 'Unidade de Medida']); 
+    sheetObject.appendRow(<CellValue>[TextCellValue("Relatório de Materiais Cadastrados")]);
+    sheetObject.appendRow(<CellValue>[TextCellValue("Gerado em: $dataHora")]);
+    sheetObject.appendRow(<CellValue>[TextCellValue("")]);
+
+    sheetObject.appendRow(<CellValue>[
+      TextCellValue("Descrição do Material"),
+      TextCellValue("Unidade de Medida")
+    ]);
+
     for (var doc in docs) {
       var d = doc.data() as Map<String, dynamic>;
-      rows.add([d['nome'], d['unidade']]);
+      sheetObject.appendRow(<CellValue>[
+        TextCellValue((d['nome'] ?? '').toString()),
+        TextCellValue((d['unidade'] ?? '').toString()),
+      ]);
     }
 
-    rows.add([]); 
-    rows.add(['Relatório gerado pelo sistema de ocorrências semafóricas - SOS']);
-    rows.add(['Gerado em:', dataHora]);
-
-    String csv = const ListToCsvConverter().convert(rows);
-    final bytes = Uint8List.fromList(utf8.encode(csv));
-    final xFile = XFile.fromData(bytes, name: 'relatorio_materiais.csv', mimeType: 'text/csv');
-    
-    await Share.shareXFiles([xFile], text: 'Segue o relatório de materiais do SOS_CTTU.');
+    var fileBytes = excel.encode();
+    if (fileBytes != null) {
+      final xfile = XFile.fromData(
+        Uint8List.fromList(fileBytes),
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        name: 'relatorio_materiais.xlsx'
+      );
+      
+      await Share.shareXFiles([xfile], text: 'Segue o relatório de materiais do SOS.');
+      
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Planilha Excel baixada com sucesso!'), backgroundColor: Colors.green));
+    }
   }
 
   @override
@@ -273,7 +312,6 @@ class _ListaMateriaisState extends State<ListaMateriais> {
             colorBlendMode: BlendMode.darken,
           ),
           
-          // Movemos o StreamBuilder para englobar toda a coluna, assim os botões enxergam a lista!
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance.collection('materiais').orderBy('nome').snapshots(),
             builder: (context, snapshot) {
@@ -310,7 +348,7 @@ class _ListaMateriaisState extends State<ListaMateriais> {
                     ),
                   ),
 
-                  // BOTÕES DE EXPORTAÇÃO (Sempre visíveis abaixo da pesquisa)
+                  // BOTÕES DE EXPORTAÇÃO
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                     child: Center(
@@ -340,7 +378,7 @@ class _ListaMateriaisState extends State<ListaMateriais> {
                                 ),
                                 icon: const Icon(Icons.table_chart, color: Colors.white, size: 18),
                                 label: const Text('Exportar Planilha', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                                onPressed: () => _exportarCSV(todosOsDocs),
+                                onPressed: () => _baixarExcel(todosOsDocs),
                               ),
                             ),
                           ],

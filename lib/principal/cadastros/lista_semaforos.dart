@@ -5,12 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
 
-// Importações para Exportação (PDF e CSV)
+// Importações para Exportação (PDF e EXCEL)
+import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:csv/csv.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:excel/excel.dart' hide Border, TextSpan;
 
 import '../../widgets/menu_usuario.dart'; 
 
@@ -285,7 +286,7 @@ class _ListaSemaforosState extends State<ListaSemaforos> with SingleTickerProvid
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
                     icon: const Icon(Icons.table_chart, color: Colors.white, size: 18),
                     label: const Text('Planilha', style: TextStyle(color: Colors.white)),
-                    onPressed: () => _exportarCsvIndividual(data, numeroFormatado),
+                    onPressed: () => _baixarExcelIndividual(data, numeroFormatado),
                   ),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.black54),
@@ -378,6 +379,7 @@ class _ListaSemaforosState extends State<ListaSemaforos> with SingleTickerProvid
                                         child: TextFormField(
                                           controller: controllers[key],
                                           maxLines: isMultilinha ? 3 : 1,
+                                          textCapitalization: TextCapitalization.characters,
                                           decoration: InputDecoration(
                                             labelText: campo['label'],
                                             border: const OutlineInputBorder(),
@@ -448,6 +450,7 @@ class _ListaSemaforosState extends State<ListaSemaforos> with SingleTickerProvid
     );
   }
 
+  // --- FUNÇÕES DE EXPORTAÇÃO E FORMATAÇÃO ---
   String _formatarDataHora() {
     final now = DateTime.now();
     final dia = now.day.toString().padLeft(2, '0');
@@ -471,10 +474,18 @@ class _ListaSemaforosState extends State<ListaSemaforos> with SingleTickerProvid
             margin: const pw.EdgeInsets.only(top: 10.0),
             padding: const pw.EdgeInsets.only(top: 10.0),
             decoration: const pw.BoxDecoration(border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300))),
-            child: pw.Text(
-              'Relatório gerado pelo sistema de ocorrências semafóricas - SOS\nGerado em: $dataHora',
-              style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
-              textAlign: pw.TextAlign.center,
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  'Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - $dataHora',
+                  style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                ),
+                pw.Text(
+                  'Página ${context.pageNumber} de ${context.pagesCount}',
+                  style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                ),
+              ],
             ),
           );
         },
@@ -522,65 +533,93 @@ class _ListaSemaforosState extends State<ListaSemaforos> with SingleTickerProvid
     await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save(), name: 'semaforo_$numeroFormatado.pdf');
   }
 
-  Future<void> _exportarCsvIndividual(Map<String, dynamic> data, String numeroFormatado) async {
-    final dataHora = _formatarDataHora();
-    List<List<dynamic>> rows = [];
+  // --- EXPORTAÇÃO EXCEL (XLSX) INDIVIDUAL ---
+  Future<void> _baixarExcelIndividual(Map<String, dynamic> data, String numeroFormatado) async {
+    var excel = Excel.createExcel();
+    Sheet sheetObject = excel['Ficha Técnica'];
+    excel.setDefaultSheet('Ficha Técnica');
 
-    rows.add(['FICHA TÉCNICA - SEMÁFORO $numeroFormatado']);
-    rows.add([]);
+    sheetObject.appendRow(<CellValue>[TextCellValue("FICHA TÉCNICA - SEMÁFORO $numeroFormatado")]);
+    sheetObject.appendRow(<CellValue>[TextCellValue("")]);
 
     for (var grupo in _gruposFormulario) {
       bool temDado = grupo['campos'].any((c) => (data[c['key']] ?? '').toString().isNotEmpty);
       if (!temDado) continue;
 
-      rows.add(['--- ${grupo['titulo'].toString().toUpperCase()} ---']);
-      rows.add(['Campo', 'Informação']);
+      sheetObject.appendRow(<CellValue>[TextCellValue("--- ${grupo['titulo'].toString().toUpperCase()} ---")]);
+      sheetObject.appendRow(<CellValue>[TextCellValue("Campo"), TextCellValue("Informação")]);
+      
       for (var campo in grupo['campos']) {
         String valor = (data[campo['key']] ?? '').toString();
         if (valor.isNotEmpty) {
-          rows.add([campo['label'].toString().replaceAll(' *', ''), valor]);
+          sheetObject.appendRow(<CellValue>[
+            TextCellValue(campo['label'].toString().replaceAll(' *', '')), 
+            TextCellValue(valor)
+          ]);
         }
       }
-      rows.add([]);
+      sheetObject.appendRow(<CellValue>[TextCellValue("")]);
     }
-
-    rows.add(['Relatório gerado pelo sistema de ocorrências semafóricas - SOS']);
-    rows.add(['Gerado em:', dataHora]);
-
-    String csv = const ListToCsvConverter().convert(rows);
-    final bytes = Uint8List.fromList(utf8.encode(csv));
-    final xFile = XFile.fromData(bytes, name: 'semaforo_$numeroFormatado.csv', mimeType: 'text/csv');
     
-    await Share.shareXFiles([xFile], text: 'Segue a ficha técnica do semáforo $numeroFormatado.');
+    sheetObject.appendRow(<CellValue>[TextCellValue("Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS - ${_formatarDataHora()}")]);
+
+    var fileBytes = excel.encode();
+    if (fileBytes != null) {
+      final xfile = XFile.fromData(
+        Uint8List.fromList(fileBytes),
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        name: 'semaforo_$numeroFormatado.xlsx'
+      );
+      await Share.shareXFiles([xfile], text: 'Segue a ficha técnica do semáforo $numeroFormatado.');
+    }
   }
 
-  // --- FUNÇÕES DE EXPORTAÇÃO GLOBAL ---
-  Future<void> _exportarCsvGlobal(List<QueryDocumentSnapshot> docs) async {
-    List<List<dynamic>> rows = [];
+  // --- EXPORTAÇÃO EXCEL (XLSX) GLOBAL (ACERVO COMPLETO) ---
+  Future<void> _baixarExcelGlobal(List<Map<String, dynamic>> docs) async {
+    var excel = Excel.createExcel();
+    Sheet sheetObject = excel['Acervo de Semáforos'];
+    excel.setDefaultSheet('Acervo de Semáforos');
 
-    List<String> cabecalho = [];
-    List<String> chaves = [];
+    sheetObject.appendRow(<CellValue>[TextCellValue("Relatório de Acervo de Semáforos")]);
+    sheetObject.appendRow(<CellValue>[TextCellValue("Gerado em: ${_formatarDataHora()}")]);
+    sheetObject.appendRow(<CellValue>[TextCellValue("")]);
+
+    List<CellValue> headers = [];
     for (var grupo in _gruposFormulario) {
       for (var campo in grupo['campos']) {
-        cabecalho.add(campo['label'].toString().replaceAll(' *', ''));
-        chaves.add(campo['key']);
+        headers.add(TextCellValue(campo['label'].toString().replaceAll(' *', '')));
       }
     }
-    rows.add(cabecalho);
+    sheetObject.appendRow(headers);
 
     for (var doc in docs) {
-      var d = doc.data() as Map<String, dynamic>;
-      List<dynamic> linha = [];
-      for (String chave in chaves) {
-        linha.add(d[chave] ?? '');
+      List<CellValue> row = [];
+      for (var grupo in _gruposFormulario) {
+        for (var campo in grupo['campos']) {
+          var val = doc[campo['key']];
+          
+          // Formatação inteligente para campos booleanos/quantitativos
+          if (val == true || val == 'Sim' || val == 'SIM' || val == 's' || val == 'true' || val == '1' || (val is num && val > 0) || (val is String && num.tryParse(val) != null && num.parse(val) > 0)) {
+            val = (val is num || (val is String && num.tryParse(val) != null)) ? val.toString() : 'Sim';
+          } else if (val == false || val == 'Não' || val == 'NÃO' || val == 'n' || val == 'false' || val == '0') {
+             val = '-';
+          }
+          
+          row.add(TextCellValue((val ?? '-').toString()));
+        }
       }
-      rows.add(linha);
+      sheetObject.appendRow(row);
     }
 
-    String csv = const ListToCsvConverter().convert(rows);
-    final bytes = Uint8List.fromList(utf8.encode(csv));
-    final xFile = XFile.fromData(bytes, name: 'acervo_completo_semaforos.csv', mimeType: 'text/csv');
-    await Share.shareXFiles([xFile], text: 'Acervo completo de semáforos.');
+    var fileBytes = excel.encode();
+    if (fileBytes != null) {
+      final xfile = XFile.fromData(
+        Uint8List.fromList(fileBytes),
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        name: 'Acervo_Completo_Semaforos.xlsx'
+      );
+      await Share.shareXFiles([xfile], text: 'Acervo completo de semáforos.');
+    }
   }
 
   @override
@@ -606,14 +645,6 @@ class _ListaSemaforosState extends State<ListaSemaforos> with SingleTickerProvid
           ],
         ),
       ),
-      floatingActionButton: _tabController.index == 0 
-        ? FloatingActionButton.extended(
-            backgroundColor: const Color(0xFF61c764), 
-            icon: const Icon(Icons.traffic, color: Colors.white),
-            label: const Text('Novo Semáforo', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            onPressed: () => _abrirModalFormulario(),
-          )
-        : null,
       body: Stack(
         fit: StackFit.expand,
         children: [
@@ -643,7 +674,7 @@ class _ListaSemaforosState extends State<ListaSemaforos> with SingleTickerProvid
                 return numA.compareTo(numB);
               });
               
-              final todosOsDocs = docsDesordenados;
+              final todosOsDocs = docsDesordenados.map((doc) => doc.data() as Map<String, dynamic>).toList();
 
               return TabBarView(
                 controller: _tabController,
@@ -692,9 +723,8 @@ class _ListaSemaforosState extends State<ListaSemaforos> with SingleTickerProvid
                                   padding: const EdgeInsets.only(bottom: 80, left: 16, right: 16, top: 8),
                                   itemCount: todosOsDocs.length,
                                   itemBuilder: (context, index) {
-                                    var doc = todosOsDocs[index];
-                                    var data = doc.data() as Map<String, dynamic>;
-
+                                    var data = todosOsDocs[index];
+                                    
                                     String idOriginal = data['id'] ?? '';
                                     String idFormatado = _formatarId(idOriginal);
                                     String endereco = data['endereco'] ?? '';
@@ -729,7 +759,8 @@ class _ListaSemaforosState extends State<ListaSemaforos> with SingleTickerProvid
                                         trailing: IconButton(
                                           icon: const Icon(Icons.visibility, color: Color(0xFF2f3b4c), size: 28),
                                           tooltip: 'Ver Detalhes',
-                                          onPressed: () => _abrirModalDetalhes(doc.id, data),
+                                          // Usamos docsDesordenados[index].id pois mantivemos o mapeamento sequencial
+                                          onPressed: () => _abrirModalDetalhes(docsDesordenados[index].id, data),
                                         ),
                                       ),
                                     );
@@ -765,8 +796,8 @@ class _ListaSemaforosState extends State<ListaSemaforos> with SingleTickerProvid
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               ),
                               icon: const Icon(Icons.table_chart, color: Colors.white, size: 24),
-                              label: const Text('Exportar Planilha de Todo o Acervo', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                              onPressed: () => _exportarCsvGlobal(todosOsDocs),
+                              label: const Text('Exportar Planilha de Todo o Acervo (XLSX)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                              onPressed: () => _baixarExcelGlobal(todosOsDocs),
                             ),
                           ],
                         ),
