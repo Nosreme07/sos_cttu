@@ -443,85 +443,6 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
     );
   }
 
-  void _abrirModalAtribuir(String docId) async {
-    final equipesSnapshot = await FirebaseFirestore.instance.collection('equipes').where('status', isEqualTo: 'ativo').get();
-    if (!mounted) return;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Atribuir Equipe', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blue)),
-              const SizedBox(height: 10),
-              if (equipesSnapshot.docs.isEmpty)
-                const Padding(padding: EdgeInsets.all(20), child: Text('Nenhuma equipe ATIVA encontrada no momento.'))
-              else
-                ...equipesSnapshot.docs.map((eq) {
-                  var data = eq.data();
-                  String placa = data['placa'] ?? 'S/ PLACA';
-                  String empresa = data['empresa'] ?? 'EXTERNA';
-                  String ints = data['integrantes_str'] ?? '';
-                  String nomeLider = ints.split(',').first.trim().toUpperCase();
-                  if (nomeLider.isEmpty) nomeLider = "EQUIPE $placa";
-
-                  return Card(
-                    elevation: 3,
-                    margin: const EdgeInsets.only(bottom: 10),
-                    child: ListTile(
-                      leading: const Icon(Icons.directions_car, color: Colors.blueGrey),
-                      title: Text('$placa - $empresa', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(ints, maxLines: 1, overflow: TextOverflow.ellipsis),
-                      trailing: const Icon(Icons.check_circle_outline, color: Colors.green),
-                      onTap: () async {
-                        await FirebaseFirestore.instance.collection('Gerenciamento_ocorrencias').doc(docId).update({
-                          'equipe_atrelada': nomeLider,
-                          'equipe_responsavel': nomeLider,
-                          'integrantes_equipe': ints, 
-                          'placa_veiculo': placa,
-                          'status': 'Em deslocamento',
-                        });
-                        if (mounted) Navigator.pop(context);
-                      },
-                    ),
-                  );
-                }),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _registrarChegada(String docId) async {
-    bool? conf = await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Registrar Chegada', style: TextStyle(color: Colors.orange)),
-        content: const Text('Confirmar que a equipe chegou ao local e iniciará o atendimento?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Confirmar', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-    if (conf == true) {
-      await FirebaseFirestore.instance.collection('Gerenciamento_ocorrencias').doc(docId).update({
-        'status': 'Em atendimento',
-        'data_atendimento': FieldValue.serverTimestamp(),
-      });
-    }
-  }
-
   void _abrirModalFinalizar(String docId, Map<String, dynamic> dados) {
     bool defeitoConstatado = true;
     bool estaSalvando = false;
@@ -760,6 +681,7 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                             });
 
                             if (mounted) Navigator.pop(context);
+                            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Atendimento concluído!'), backgroundColor: Colors.green));
                           } catch (e) {
                             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
                             setStateModal(() => estaSalvando = false);
@@ -777,6 +699,86 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
     );
   }
 
+  void _abrirModalAtribuir(String docId) async {
+    final equipesSnapshot = await FirebaseFirestore.instance.collection('equipes').where('status', isEqualTo: 'ativo').get();
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Atribuir Equipe', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blue)),
+              const SizedBox(height: 10),
+              if (equipesSnapshot.docs.isEmpty)
+                const Padding(padding: EdgeInsets.all(20), child: Text('Nenhuma equipe ATIVA encontrada no momento.'))
+              else
+                ...equipesSnapshot.docs.map((eq) {
+                  var data = eq.data();
+                  String placa = data['placa'] ?? 'S/ PLACA';
+                  String empresa = data['empresa'] ?? 'EXTERNA';
+                  String ints = data['integrantes_str'] ?? '';
+                  String nomeLider = ints.split(',').first.trim().toUpperCase();
+                  if (nomeLider.isEmpty) nomeLider = "EQUIPE $placa";
+
+                  return Card(
+                    elevation: 3,
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: ListTile(
+                      leading: const Icon(Icons.directions_car, color: Colors.blueGrey),
+                      title: Text('$placa - $empresa', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text(ints, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      trailing: const Icon(Icons.check_circle_outline, color: Colors.green),
+                      onTap: () async {
+                        await FirebaseFirestore.instance.collection('Gerenciamento_ocorrencias').doc(docId).update({
+                          'equipe_atrelada': nomeLider,
+                          'equipe_responsavel': nomeLider,
+                          'integrantes_equipe': ints, 
+                          'placa_veiculo': placa,
+                          'status': 'Em deslocamento',
+                        });
+                        if (mounted) Navigator.pop(context);
+                      },
+                    ),
+                  );
+                }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _registrarChegada(String docId) async {
+    bool? conf = await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Registrar Chegada', style: TextStyle(color: Colors.orange)),
+        content: const Text('Confirmar que a equipe chegou ao local e iniciará o atendimento?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Confirmar', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (conf == true) {
+      await FirebaseFirestore.instance.collection('Gerenciamento_ocorrencias').doc(docId).update({
+        'status': 'Em atendimento',
+        'data_atendimento': FieldValue.serverTimestamp(),
+      });
+    }
+  }
+
+  // --- NOVO MODAL PARA VISUALIZAÇÃO DE DETALHES GERAIS DA OCORRÊNCIA ---
   void _abrirModalVisualizar(Map<String, dynamic> dados) {
     String numOcc = dados['numero_da_ocorrencia'] ?? dados['id'] ?? 'N/A';
     
@@ -784,6 +786,8 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
     DateTime? finalizacaoDt = dados['data_de_finalizacao'] != null ? (dados['data_de_finalizacao'] as Timestamp).toDate() : null;
     
     String textoVencimento = 'Não';
+    bool estaVencida = false;
+
     String prazoStr = (dados['prazo'] ?? '').toString();
     if (prazoStr.isEmpty) {
       var falhaDoc = _falhasAux.firstWhere((f) => f['falha'] == dados['tipo_da_falha'], orElse: () => <String, dynamic>{});
@@ -791,10 +795,12 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
     }
     int prazoMinutos = int.tryParse(prazoStr.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
 
-    if (aberturaDt != null && finalizacaoDt != null && prazoMinutos > 0) {
+    if (aberturaDt != null && prazoMinutos > 0) {
       DateTime limite = aberturaDt.add(Duration(minutes: prazoMinutos));
-      if (finalizacaoDt.isAfter(limite)) {
-        int minutosExcedidos = finalizacaoDt.difference(limite).inMinutes;
+      DateTime referenciaVencimento = finalizacaoDt ?? DateTime.now(); // Se não finalizou, compara com a hora atual
+      if (referenciaVencimento.isAfter(limite)) {
+        estaVencida = true;
+        int minutosExcedidos = referenciaVencimento.difference(limite).inMinutes;
         textoVencimento = 'Sim ($minutosExcedidos minutos excedidos)';
       }
     }
@@ -803,6 +809,12 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
     String integrantesFormatados = integrantesRaw != '---'
         ? integrantesRaw.split(',').map((e) => '- ${e.trim().toUpperCase()}').join('\n')
         : '---';
+
+    String empresa = (dados['empresa_semaforo'] ?? '').toString();
+    if (empresa.isEmpty) {
+      var semInfo = _semaforosAux.firstWhere((s) => s['id'] == dados['semaforo'], orElse: () => <String, dynamic>{});
+      empresa = (semInfo['empresa'] ?? '---').toString();
+    }
 
     showDialog(
       context: context,
@@ -825,7 +837,8 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                 ),
                 const Divider(),
                 
-                _infoRow('Semáforo:', '${dados['semaforo']} - ${dados['endereco']}'),
+                _infoRow('Semáforo com endereço:', '${dados['semaforo']} - ${dados['endereco']}'),
+                _infoRow('Empresa:', empresa),
                 _infoRow('Bairro:', dados['bairro'] ?? '---'),
                 _infoRow('Origem:', dados['origem_da_ocorrencia'] ?? '---'),
                 const SizedBox(height: 10),
@@ -833,17 +846,37 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                 const Text('DATAS E PRAZOS', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
                 _infoRow('Abertura:', _formatarDataHoraCompleta(dados['data_de_abertura'])),
                 _infoRow('Atendimento:', _formatarDataHoraCompleta(dados['data_atendimento'])),
-                _infoRow('Finalização:', _formatarDataHoraCompleta(dados['data_de_finalizacao'])),
-                _infoRow('Ocorrência Venceu:', textoVencimento, corValor: textoVencimento.startsWith('Sim') ? Colors.red : Colors.green),
+                
+                // Customização do campo "Ocorrência venceu" com o ícone do relógio dinâmico
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Ocorrência venceu: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.blueGrey)),
+                      Expanded(
+                        child: Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(textoVencimento, style: TextStyle(fontSize: 14, color: estaVencida ? Colors.red : Colors.green, fontWeight: FontWeight.bold)),
+                            if (estaVencida) ...[
+                              const SizedBox(width: 4),
+                              const Icon(Icons.access_time, color: Colors.red, size: 16),
+                            ]
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 10),
 
                 const Text('ENVOLVIDOS', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
                 _infoRow('Gerada por:', dados['usuario_abertura'] ?? 'Sistema'),
-                _infoRow('Finalizada por:', dados['usuario_finalizacao'] ?? '---'),
                 
                 const Padding(
                   padding: EdgeInsets.only(bottom: 4, top: 4),
-                  child: Text('Equipe Responsável:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  child: Text('Equipe responsável:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.blueGrey)),
                 ),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 6),
@@ -895,7 +928,7 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
         text: TextSpan(
           style: const TextStyle(fontSize: 14, color: Colors.black87),
           children: [
-            TextSpan(text: '$label ', style: const TextStyle(fontWeight: FontWeight.bold)),
+            TextSpan(text: '$label ', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
             TextSpan(text: value, style: TextStyle(color: corValor ?? Colors.black87)),
           ],
         ),
@@ -1387,10 +1420,20 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                                                       margin: const EdgeInsets.symmetric(vertical: 4),
                                                       height: 1, color: Colors.grey.shade400,
                                                     ),
-                                                    Text(
-                                                      txtPrazo,
-                                                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: prazoVencido ? Colors.red : Colors.blueGrey),
-                                                      textAlign: TextAlign.center,
+                                                    Wrap(
+                                                      crossAxisAlignment: WrapCrossAlignment.center,
+                                                      alignment: WrapAlignment.center,
+                                                      children: [
+                                                        Text(
+                                                          txtPrazo,
+                                                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: prazoVencido ? Colors.red : Colors.blueGrey),
+                                                          textAlign: TextAlign.center,
+                                                        ),
+                                                        if (prazoVencido) ...[
+                                                          const SizedBox(width: 4),
+                                                          const Icon(Icons.access_time, color: Colors.red, size: 14),
+                                                        ],
+                                                      ],
                                                     ),
                                                   ],
                                                 ),
@@ -1398,10 +1441,10 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                                       ),
                                       DataCell(
                                         SizedBox(
-                                          width: 160,
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            mainAxisAlignment: MainAxisAlignment.center,
+                                          width: 100, // Largura controlada para forçar a quebra em 2 linhas (2x2)
+                                          child: Wrap(
+                                            alignment: WrapAlignment.center,
+                                            runSpacing: -8, // Aproxima as linhas para não ficar muito alto
                                             children: isConcluido
                                                 ? [
                                                     IconButton(
@@ -1420,6 +1463,11 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                                                       icon: const Icon(Icons.edit, color: Colors.blueGrey, size: 22),
                                                       tooltip: 'Editar',
                                                       onPressed: () => _abrirModalCadastro(docId: doc.id, dadosAtuais: d),
+                                                    ),
+                                                    IconButton(
+                                                      icon: const Icon(Icons.visibility, color: Colors.blue, size: 22),
+                                                      tooltip: 'Visualizar Ocorrência',
+                                                      onPressed: () => _abrirModalVisualizar(d),
                                                     ),
                                                     IconButton(
                                                       icon: const Icon(Icons.directions_car, color: Colors.blue, size: 22),
