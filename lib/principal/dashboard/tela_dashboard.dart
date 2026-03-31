@@ -90,7 +90,7 @@ class _TelaDashboardState extends State<TelaDashboard> {
     }
   }
 
-  // --- MODAL DIA DE CHUVA ---
+  // --- MODAL OCORRÊNCIAS CRÍTICAS ---
   void _abrirModalDiaChuva() {
     DateTime? tempInicio = _dataInicio ?? DateTime.now().subtract(const Duration(hours: 12));
     DateTime? tempFim = _dataFim ?? DateTime.now();
@@ -213,7 +213,8 @@ class _TelaDashboardState extends State<TelaDashboard> {
 
   String _categorizarStatusParaKpi(String statusRaw) {
     String st = statusRaw.toLowerCase();
-    if (st.contains('deslocamento') || st.contains('atendimento')) return 'Pendente';
+    // A lógica certa: pendentes são ocorrências abertas, em deslocamento e em atendimento.
+    if (st.contains('aberto') || st.contains('deslocamento') || st.contains('atendimento')) return 'Pendente';
     if (st.contains('conclu') || st.contains('finaliz')) return 'Concluído';
     return 'Outros';
   }
@@ -269,15 +270,15 @@ class _TelaDashboardState extends State<TelaDashboard> {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   _buildPdfKpi('Total do Período', total.toString(), PdfColors.blue),
-                  _buildPdfKpi('Pendentes (Desl./Atend.)', pendentes.toString(), PdfColors.orange),
+                  _buildPdfKpi('Pendentes', pendentes.toString(), PdfColors.orange),
                   _buildPdfKpi('Concluídas', concluidos.toString(), PdfColors.green),
                 ]
               ),
               pw.SizedBox(height: 30),
 
-              // LISTAGEM DE DADOS (Chuva vs Normal)
+              // LISTAGEM DE DADOS (Críticas vs Normal)
               if (_filtroDiaChuva) ...[
-                pw.Text('Detalhamento de Ocorrências Críticas)', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey900)),
+                pw.Text('Detalhamento de Ocorrências Críticas', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey900)),
                 pw.Divider(color: PdfColors.grey400),
                 pw.SizedBox(height: 10),
                 
@@ -351,7 +352,7 @@ class _TelaDashboardState extends State<TelaDashboard> {
                    pw.Text('Nenhuma ocorrência encontrada para o período.', style: const pw.TextStyle(color: PdfColors.grey))
                 else
                   pw.TableHelper.fromTextArray(
-                    headers: ['Nº Ocorrência', 'Semáforo c/ Endereço', 'Falha Relatada', 'Falha Encontrada', 'Datas (Abertura / Fech.)', 'Status'],
+                    headers: ['Nº Ocorrência', 'Semáforo c/ Endereço', 'Falha Relatada', 'Falha Encontrada', 'Abertura', 'Fechamento', 'Status'],
                     data: docs.take(50).map((doc) {
                       var d = doc.data() as Map<String, dynamic>;
                       String numOc = (d['numero_da_ocorrencia'] ?? d['id'] ?? doc.id).toString();
@@ -366,7 +367,8 @@ class _TelaDashboardState extends State<TelaDashboard> {
                         '${d['semaforo']} - ${d['endereco']}',
                         (d['tipo_da_falha'] ?? '-').toString(),
                         (d['falha_aparente_final'] ?? '-').toString(),
-                        'Ab: ${_formatarDataHora(d['data_de_abertura'])}\nFc: ${_formatarDataHora(d['data_de_finalizacao'])}',
+                        _formatarDataHora(d['data_de_abertura']),
+                        _formatarDataHora(d['data_de_finalizacao']),
                         stDisplay
                       ];
                     }).toList(),
@@ -377,11 +379,12 @@ class _TelaDashboardState extends State<TelaDashboard> {
                     cellStyle: const pw.TextStyle(fontSize: 8),
                     columnWidths: {
                       0: const pw.FlexColumnWidth(1.2),
-                      1: const pw.FlexColumnWidth(3),
+                      1: const pw.FlexColumnWidth(2.5),
                       2: const pw.FlexColumnWidth(1.5),
                       3: const pw.FlexColumnWidth(1.5),
-                      4: const pw.FlexColumnWidth(1.5),
-                      5: const pw.FlexColumnWidth(1.2),
+                      4: const pw.FlexColumnWidth(1),
+                      5: const pw.FlexColumnWidth(1),
+                      6: const pw.FlexColumnWidth(1.2),
                     }
                   ),
               ]
@@ -453,7 +456,7 @@ class _TelaDashboardState extends State<TelaDashboard> {
 
               List<QueryDocumentSnapshot> docs = snapshot.data?.docs ?? [];
 
-              // --- 1. APLICAR FILTROS INTELIGENTES (TEMPO E CHUVA) ---
+              // --- 1. APLICAR FILTROS INTELIGENTES (TEMPO E CRÍTICAS) ---
               DateTime now = DateTime.now();
               DateTime? filterStart;
               DateTime? filterEnd;
@@ -494,7 +497,7 @@ class _TelaDashboardState extends State<TelaDashboard> {
                   if (filterEnd != null && dtAbertura.isAfter(filterEnd)) return false;
                 }
 
-                // Filtro Dia de Chuva
+                // Filtro Ocorrências Críticas
                 if (_filtroDiaChuva) {
                   String falha = (d['tipo_da_falha'] ?? '').toString().toUpperCase().trim();
                   if (!falhasChuva.contains(falha)) return false;
@@ -503,17 +506,17 @@ class _TelaDashboardState extends State<TelaDashboard> {
                 return true;
               }).toList();
 
-              // --- ORDENAÇÃO GLOBAL POR STATUS (Exigência para a Tabela e PDFs) ---
+              // --- ORDENAÇÃO GLOBAL POR STATUS E DATA RECENTE ---
               docs.sort((a, b) {
                 var dA = a.data() as Map<String, dynamic>;
                 var dB = b.data() as Map<String, dynamic>;
                 int wA = _getStatusWeight(dA['status'] ?? '');
                 int wB = _getStatusWeight(dB['status'] ?? '');
-                if (wA != wB) return wA.compareTo(wB); // Ordena pelo Status Real (Aberto > Desloc > Atend > Fim)
+                if (wA != wB) return wA.compareTo(wB); // Prioridade 1: Status Real
                 
                 DateTime dtA = dA['data_de_abertura'] != null ? (dA['data_de_abertura'] as Timestamp).toDate() : DateTime.fromMillisecondsSinceEpoch(0);
                 DateTime dtB = dB['data_de_abertura'] != null ? (dB['data_de_abertura'] as Timestamp).toDate() : DateTime.fromMillisecondsSinceEpoch(0);
-                return dtB.compareTo(dtA); // Desempate pelas mais recentes
+                return dtB.compareTo(dtA); // Prioridade 2: Mais recente primeiro
               });
 
               // --- 2. CÁLCULO DOS KPIs E AGRUPAMENTO ---
@@ -528,7 +531,7 @@ class _TelaDashboardState extends State<TelaDashboard> {
               for (var doc in docs) {
                 var d = doc.data() as Map<String, dynamic>;
                 
-                // KPI Logic
+                // KPI Logic (Aberto, Deslocamento e Atendimento contam como Pendente)
                 String catKPI = _categorizarStatusParaKpi(d['status'] ?? '');
                 if (catKPI == 'Pendente') pendentes++;
                 else if (catKPI == 'Concluído') concluidos++;
@@ -542,7 +545,7 @@ class _TelaDashboardState extends State<TelaDashboard> {
                   falhasCount[falha] = (falhasCount[falha] ?? 0) + 1;
                 }
                 
-                // Agrupamento para Dia de Chuva
+                // Agrupamento para Ocorrências Críticas
                 if (_filtroDiaChuva) {
                   if (!agrupadosChuva.containsKey(falha)) agrupadosChuva[falha] = [];
                   agrupadosChuva[falha]!.add(d);
@@ -659,7 +662,7 @@ class _TelaDashboardState extends State<TelaDashboard> {
                               childAspectRatio: 3.5, 
                               children: [
                                 _buildKpiCard('Total do Período', total.toString(), Colors.blue, Icons.assignment),
-                                _buildKpiCard('Pendentes (Desl./Atend.)', pendentes.toString(), Colors.orange, Icons.warning_amber_rounded),
+                                _buildKpiCard('Pendentes', pendentes.toString(), Colors.orange, Icons.warning_amber_rounded),
                                 _buildKpiCard('Concluídas', concluidos.toString(), Colors.green, Icons.check_circle_outline),
                               ],
                             );
@@ -746,11 +749,11 @@ class _TelaDashboardState extends State<TelaDashboard> {
                               
                               if (isDesktop) const SizedBox(width: 24) else const SizedBox(height: 24),
 
-                              // GRÁFICO DE BARRAS (TOP 5 FALHAS)
+                              // GRÁFICO DE BARRAS (TOP 5 FALHAS) COM NOMES COMPLETOS
                               Expanded(
                                 flex: isDesktop ? 1 : 0,
                                 child: Container(
-                                  height: 380, 
+                                  height: 380, // Aumentado para caber o texto
                                   padding: const EdgeInsets.all(20),
                                   decoration: BoxDecoration(
                                     color: Colors.white,
@@ -798,7 +801,7 @@ class _TelaDashboardState extends State<TelaDashboard> {
                                                         showTitles: true,
                                                         reservedSize: 40,
                                                         getTitlesWidget: (value, meta) {
-                                                          if(value % 1 != 0) return const SizedBox.shrink(); 
+                                                          if(value % 1 != 0) return const SizedBox.shrink(); // Apenas inteiros
                                                           return Text(value.toInt().toString(), style: const TextStyle(color: Colors.blueGrey, fontSize: 10, fontWeight: FontWeight.bold));
                                                         }
                                                       )
@@ -806,7 +809,7 @@ class _TelaDashboardState extends State<TelaDashboard> {
                                                     bottomTitles: AxisTitles(
                                                       sideTitles: SideTitles(
                                                         showTitles: true,
-                                                        reservedSize: 90, 
+                                                        reservedSize: 90, // Área muito aumentada para caber o texto
                                                         getTitlesWidget: (double value, TitleMeta meta) {
                                                           if (value.toInt() >= top5Falhas.length) return const SizedBox.shrink();
                                                           String title = top5Falhas[value.toInt()].key;
@@ -867,7 +870,7 @@ class _TelaDashboardState extends State<TelaDashboard> {
 
                         // --- LISTAGEM INFERIOR (TABELA NORMAL OU AGRUPADA POR CHUVA) ---
                         if (_filtroDiaChuva) ...[
-                          // VISÃO DIA DE CHUVA (SIMPLIFICADA E BLINDADA CONTRA ERRO DE TELA BRANCA)
+                          // VISÃO OCORRÊNCIAS CRÍTICAS (Agrupada por Falha usando ListTile Nativo)
                           Container(
                             padding: const EdgeInsets.all(20),
                             decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)]),
@@ -877,7 +880,7 @@ class _TelaDashboardState extends State<TelaDashboard> {
                                 const Text('Detalhamento de Ocorrências Críticas', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2c3e50))),
                                 const Divider(),
                                 if (agrupadosChuva.isEmpty)
-                                  const Padding(padding: EdgeInsets.all(20), child: Center(child: Text('Nenhuma ocorrência crítica registrada no período.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))))
+                                  const Padding(padding: EdgeInsets.all(20), child: Center(child: Text('Nenhuma ocorrência crítica registrada neste período.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))))
                                 else
                                   ...agrupadosChuva.entries.map((grupo) {
                                     return Container(
@@ -897,34 +900,32 @@ class _TelaDashboardState extends State<TelaDashboard> {
                                             if (stDisplay == 'EM ATENDIMENTO') stDisplay = 'EM\nATENDIMENTO';
                                             if (stDisplay == 'EM DESLOCAMENTO') stDisplay = 'EM\nDESLOCAMENTO';
 
-                                            return Container(
-                                              margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                                              padding: const EdgeInsets.all(12),
-                                              decoration: BoxDecoration(
-                                                color: Colors.white,
-                                                border: Border(left: BorderSide(color: _corStatusReal(st), width: 4), bottom: BorderSide(color: Colors.grey.shade200)),
-                                              ),
-                                              child: Row(
-                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                                crossAxisAlignment: CrossAxisAlignment.center,
+                                            return ListTile(
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                              title: Row(
                                                 children: [
-                                                  Expanded(
-                                                    child: Column(
-                                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                                      children: [
-                                                        Text('🚦 ${oc['semaforo'] ?? '---'} - ${oc['endereco'] ?? '---'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87)),
-                                                        const SizedBox(height: 6),
-                                                        Text('Abertura: ${_formatarDataHora(oc['data_de_abertura'])}   |   Fechamento: ${_formatarDataHora(oc['data_de_finalizacao'])}', style: const TextStyle(fontSize: 11, color: Colors.black54)),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  Container(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                                                    decoration: BoxDecoration(color: _corStatusReal(st), borderRadius: BorderRadius.circular(4)),
-                                                    child: Text(stDisplay, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
-                                                  )
+                                                  const Icon(Icons.traffic, size: 16, color: Colors.blueGrey),
+                                                  const SizedBox(width: 6),
+                                                  Expanded(child: Text('${oc['semaforo'] ?? '---'} - ${oc['endereco'] ?? '---'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87))),
                                                 ],
+                                              ),
+                                              subtitle: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  const SizedBox(height: 4),
+                                                  Wrap(
+                                                    spacing: 16, runSpacing: 4,
+                                                    children: [
+                                                      Text('Abertura: ${_formatarDataHora(oc['data_de_abertura'])}', style: const TextStyle(fontSize: 11, color: Colors.black54)),
+                                                      Text('Fechamento: ${_formatarDataHora(oc['data_de_finalizacao'])}', style: const TextStyle(fontSize: 11, color: Colors.black54)),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                              trailing: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                                decoration: BoxDecoration(color: _corStatusReal(st), borderRadius: BorderRadius.circular(4)),
+                                                child: Text(stDisplay, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
                                               ),
                                             );
                                           }).toList()
@@ -936,7 +937,7 @@ class _TelaDashboardState extends State<TelaDashboard> {
                             ),
                           )
                         ] else ...[
-                          // VISÃO NORMAL (Tabela com Datas na Mesma Coluna)
+                          // VISÃO NORMAL (Tabela de Ocorrências CENTRALIZADA)
                           Container(
                             padding: const EdgeInsets.all(20),
                             decoration: BoxDecoration(
@@ -974,6 +975,7 @@ class _TelaDashboardState extends State<TelaDashboard> {
                                       rows: docs.take(20).map((doc) {
                                         var d = doc.data() as Map<String, dynamic>;
                                         String st = d['status'] ?? 'Aberto';
+                                        
                                         String stDisplay = st.toUpperCase();
                                         if (stDisplay == 'EM ATENDIMENTO') stDisplay = 'EM\nATENDIMENTO';
                                         if (stDisplay == 'EM DESLOCAMENTO') stDisplay = 'EM\nDESLOCAMENTO';
@@ -1029,7 +1031,7 @@ class _TelaDashboardState extends State<TelaDashboard> {
     );
   }
 
-  // WIDGET AUXILIAR DO KPI APRIMORADO COM ÍCONES
+  // WIDGET AUXILIAR DO KPI APRIMORADO COM ÍCONES E DESIGN IDÊNTICO À FOTO
   Widget _buildKpiCard(String title, String value, Color color, IconData icon) {
     return Container(
       decoration: BoxDecoration(

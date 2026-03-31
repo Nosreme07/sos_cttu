@@ -437,7 +437,7 @@ class _ListaSemaforosState extends State<ListaSemaforos> with SingleTickerProvid
                         },
                         child: estaCarregando 
                             ? const CircularProgressIndicator(color: Colors.white) 
-                            : const Text('Salvar Alterações', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                            : Text(isEditando ? 'Salvar Alterações' : 'Cadastrar Semáforo', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
@@ -645,6 +645,20 @@ class _ListaSemaforosState extends State<ListaSemaforos> with SingleTickerProvid
           ],
         ),
       ),
+      // --- BOTÃO DE CADASTRAR NOVO SEMÁFORO ---
+      floatingActionButton: _tabController.index == 0 
+          ? FloatingActionButton.extended(
+              onPressed: () {
+                _abrirModalFormulario(); // Chamando vazio, todos os campos vêm liberados e vazios!
+              },
+              backgroundColor: const Color(0xFF61c764),
+              icon: const Icon(Icons.add, color: Colors.white),
+              label: const Text(
+                'Novo Semáforo', 
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)
+              ),
+            )
+          : null,
       body: Stack(
         fit: StackFit.expand,
         children: [
