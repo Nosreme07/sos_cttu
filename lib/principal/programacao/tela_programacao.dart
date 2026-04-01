@@ -1,5 +1,12 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
+
+// Importações para PDF
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../../widgets/menu_usuario.dart';
 
@@ -42,25 +49,36 @@ class RulerPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.black45
-      ..strokeWidth = 1;
-    final textStyle = const TextStyle(color: Colors.black54, fontSize: 9, fontWeight: FontWeight.bold);
-    
-    // Linha base
-    canvas.drawLine(Offset(0, size.height), Offset(size.width, size.height), paint);
-    
-    int step = tc > 120 ? 20 : 10;
-    if (tc == 0) return;
+    final paintBase = Paint()..color = Colors.black45..strokeWidth = 1;
+    final paintTracoMaior = Paint()..color = Colors.black87..strokeWidth = 1.5;
+    final paintTracoMedio = Paint()..color = Colors.black54..strokeWidth = 1.0;
+    final paintTracoMenor = Paint()..color = Colors.black26..strokeWidth = 0.5;
 
-    for (int i = 0; i <= tc; i += step) {
+    final textStyle = const TextStyle(color: Colors.black87, fontSize: 9, fontWeight: FontWeight.bold);
+    
+    canvas.drawLine(Offset(0, size.height), Offset(size.width, size.height), paintBase);
+    
+    if (tc <= 0) return;
+
+    for (int i = 0; i <= tc; i++) {
       double x = (i / tc) * size.width;
-      canvas.drawLine(Offset(x, size.height - 5), Offset(x, size.height), paint);
-      
-      final textSpan = TextSpan(text: '$i', style: textStyle);
-      final textPainter = TextPainter(text: textSpan, textDirection: TextDirection.ltr);
-      textPainter.layout();
-      textPainter.paint(canvas, Offset(x - (textPainter.width / 2), 0));
+
+      if (i % 10 == 0) {
+        canvas.drawLine(Offset(x, size.height - 8), Offset(x, size.height), paintTracoMaior);
+        final textSpan = TextSpan(text: '$i', style: textStyle);
+        final textPainter = TextPainter(text: textSpan, textDirection: ui.TextDirection.ltr);
+        textPainter.layout();
+        
+        double dx = x - (textPainter.width / 2);
+        if (i == tc) dx = x - textPainter.width - 6; 
+        if (i == 0) dx = 0;
+
+        textPainter.paint(canvas, Offset(dx, 0));
+      } else if (i % 5 == 0) {
+        canvas.drawLine(Offset(x, size.height - 5), Offset(x, size.height), paintTracoMedio);
+      } else {
+        canvas.drawLine(Offset(x, size.height - 3), Offset(x, size.height), paintTracoMenor);
+      }
     }
   }
 
@@ -116,11 +134,20 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
     List<dynamic> pg = widget.plano['groups'] ?? [];
     
     for (var gg in widget.gruposGlobais) {
-      var existing = pg.firstWhere((p) => p['id'] == gg['id'] || p['name'] == gg['id'], orElse: () => null);
+      Map<String, dynamic>? existing;
+      for (var p in pg) {
+        if (p is Map) {
+          if (p['id'] == gg['id'] || p['name'] == gg['id']) {
+            existing = Map<String, dynamic>.from(p);
+            break;
+          }
+        }
+      }
+
       if (existing != null) {
         _localGroups.add({
           'id': gg['id'],
-          'name': gg['nome'],
+          'name': gg['nome'] ?? gg['name'] ?? '',
           'startCtrl': TextEditingController(text: existing['start']?.toString() ?? '0'),
           'endCtrl': TextEditingController(text: existing['end']?.toString() ?? '0'),
           'yellowCtrl': TextEditingController(text: existing['yellow']?.toString() ?? '3'),
@@ -129,7 +156,7 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
       } else {
         _localGroups.add({
           'id': gg['id'],
-          'name': gg['nome'],
+          'name': gg['nome'] ?? gg['name'] ?? '',
           'startCtrl': TextEditingController(text: '0'),
           'endCtrl': TextEditingController(text: '0'),
           'yellowCtrl': TextEditingController(text: '3'),
@@ -140,65 +167,133 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
   }
 
   void _notificarMudanca() {
-    widget.plano['tc'] = int.tryParse(_tcCtrl.text) ?? 100;
-    widget.plano['offset'] = int.tryParse(_offsetCtrl.text) ?? 0;
-    widget.plano['groups'] = _localGroups.map((g) => {
-      'id': g['id'],
-      'name': g['id'],
-      'phase': g['name'],
-      'start': int.tryParse(g['startCtrl'].text) ?? 0,
-      'end': int.tryParse(g['endCtrl'].text) ?? 0,
-      'yellow': int.tryParse(g['yellowCtrl'].text) ?? 3,
-      'allRed': int.tryParse(g['allRedCtrl'].text) ?? 2,
+    int somaTc = 0;
+
+    widget.plano['groups'] = _localGroups.map((g) {
+      int start = int.tryParse(g['startCtrl'].text) ?? 0;
+      int end = int.tryParse(g['endCtrl'].text) ?? 0;
+      int yellow = int.tryParse(g['yellowCtrl'].text) ?? 3;
+      int allRed = int.tryParse(g['allRedCtrl'].text) ?? 2;
+      
+      int verde = end >= start ? end - start : 0;
+      somaTc += (verde + yellow + allRed);
+
+      return {
+        'id': g['id'],
+        'name': g['id'],
+        'phase': g['name'],
+        'start': start,
+        'end': end,
+        'yellow': yellow,
+        'allRed': allRed,
+      };
     }).toList();
+    
+    if (somaTc > 0) {
+      _tcCtrl.text = somaTc.toString();
+      widget.plano['tc'] = somaTc;
+    }
+
+    widget.plano['offset'] = int.tryParse(_offsetCtrl.text) ?? 0;
     
     widget.onUpdate();
     setState(() {});
   }
 
-  Widget _buildInput(TextEditingController ctrl, {Color? bg, Color? textC, double width = 45}) {
+  Widget _buildInput(TextEditingController ctrl, {Color? bg, Color? textC, double width = 45, bool? isReadOnly}) {
+    bool inputHabilitado = isReadOnly == true ? false : widget.modoEdicao;
     return Container(
       width: width,
       height: 26,
+      alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: bg ?? Colors.white,
+        color: bg ?? (inputHabilitado ? Colors.white : Colors.grey.shade200),
         border: Border.all(color: Colors.grey.shade300),
         borderRadius: BorderRadius.circular(4),
       ),
       child: TextField(
         controller: ctrl,
-        enabled: widget.modoEdicao,
+        enabled: inputHabilitado,
         textAlign: TextAlign.center,
+        textAlignVertical: TextAlignVertical.center, 
         keyboardType: TextInputType.number,
         style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textC ?? Colors.black87),
-        decoration: const InputDecoration(border: InputBorder.none, contentPadding: EdgeInsets.only(bottom: 12)),
+        decoration: const InputDecoration(
+          border: InputBorder.none, 
+          isDense: true, 
+          contentPadding: EdgeInsets.zero
+        ),
         onChanged: (_) => _notificarMudanca(),
       ),
     );
+  }
+
+  List<Widget> _drawSegment(double start, double duration, double tc, double width, double height, Color color, bool isRed, {String? text}) {
+    if (tc <= 0 || duration <= 0) return [];
+    start = start % tc;
+    if (start < 0) start += tc;
+    
+    Widget buildBox(double w, [String? t]) {
+      return Container(
+        height: height,
+        width: w,
+        decoration: BoxDecoration(color: color, border: isRed ? null : Border.all(color: Colors.black26, width: 0.5)),
+        alignment: Alignment.center,
+        child: (t != null && w > 20) ? Text(t, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)) : null,
+      );
+    }
+
+    if (start + duration <= tc) {
+      return [ Positioned(left: (start / tc) * width, top: 0, bottom: 0, child: Center(child: buildBox((duration / tc) * width, text))) ];
+    } else {
+      double d1 = tc - start;
+      double d2 = duration - d1;
+      return [
+        Positioned(left: (start / tc) * width, top: 0, bottom: 0, child: Center(child: buildBox((d1 / tc) * width, text))),
+        Positioned(left: 0, top: 0, bottom: 0, child: Center(child: buildBox((d2 / tc) * width))), 
+      ];
+    }
+  }
+
+  Color _obterCorDoPlanoLocal(String planId) {
+    String idFormatado = planId.toUpperCase().trim();
+    if (idFormatado == 'PISCANTE') return Colors.amber.shade700;
+    if (idFormatado == 'APAGADO') return Colors.grey.shade800;
+
+    int idNum = int.tryParse(idFormatado.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+    List<Color> paleta = [Colors.blue, Colors.purple, Colors.teal, Colors.indigo, Colors.pink, Colors.cyan, Colors.deepOrange, Colors.lightGreen, Colors.deepPurple, Colors.brown];
+    return paleta[idNum % paleta.length];
   }
 
   @override
   Widget build(BuildContext context) {
     String tipoStr = widget.plano['type']?.toString() ?? 'normal';
     String planIdStr = widget.plano['planId']?.toString().toUpperCase() ?? '??';
+    Color corPlano = _obterCorDoPlanoLocal(planIdStr);
 
     if (tipoStr == 'special') {
       Color corFundo = (planIdStr == 'PISCANTE') ? Colors.yellow.shade700 : Colors.grey.shade800;
-      return Container(
+      return Card(
         margin: const EdgeInsets.only(top: 16),
-        decoration: BoxDecoration(border: Border.all(color: const Color(0xFF2f3b4c)), borderRadius: BorderRadius.circular(4)),
+        elevation: 2,
+        clipBehavior: Clip.antiAlias, 
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(
-              padding: const EdgeInsets.all(8), color: const Color(0xFF2f3b4c),
-              child: Text('MODO $planIdStr', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              color: const Color(0xFF2f3b4c), 
+              child: Text('MODO $planIdStr', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14)),
             ),
-            SizedBox(
-              height: 60,
-              child: planIdStr == 'PISCANTE' 
-                ? CustomPaint(painter: PiscantePainter()) 
-                : Container(color: corFundo),
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
+              child: SizedBox(
+                height: 60,
+                child: planIdStr == 'PISCANTE' 
+                  ? CustomPaint(painter: PiscantePainter()) 
+                  : Container(color: corFundo),
+              ),
             ),
           ]
         )
@@ -208,30 +303,29 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
     int tc = int.tryParse(_tcCtrl.text) ?? 100;
     if (tc <= 0) tc = 1;
 
-    return Container(
+    return Card(
       margin: const EdgeInsets.only(top: 16),
-      decoration: BoxDecoration(
-        border: Border.all(color: const Color(0xFF2f3b4c), width: 1),
-        borderRadius: BorderRadius.circular(4),
-        color: Colors.white,
-      ),
+      elevation: 2,
+      clipBehavior: Clip.antiAlias, 
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            padding: const EdgeInsets.all(8),
-            color: const Color(0xFF2f3b4c),
-            child: Text('PLANO $planIdStr', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            color: const Color(0xFF2f3b4c), 
+            child: Text('PLANO $planIdStr   |   Ciclo: ${tc}s', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14)),
           ),
           
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            color: Colors.grey.shade100,
+            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.grey.shade300))),
             child: Row(
               children: [
-                const Text('Ciclo: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                _buildInput(_tcCtrl, width: 50),
-                const Text(' Seg.   Parâmetro (OFFSET): ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                const Text('Ciclo Auto: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                _buildInput(_tcCtrl, width: 50, isReadOnly: true, bg: Colors.grey.shade300), // Ciclo travado
+                const SizedBox(width: 16),
+                const Text('Parâmetro (OFFSET): ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                 _buildInput(_offsetCtrl, width: 50),
               ],
             ),
@@ -293,6 +387,7 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
                 flex: 3,
                 child: Container(
                   decoration: BoxDecoration(border: Border(left: BorderSide(color: Colors.grey.shade300))),
+                  padding: const EdgeInsets.only(left: 16, right: 16),
                   child: Column(
                     children: [
                       SizedBox(
@@ -305,35 +400,28 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
                           child: LayoutBuilder(
                             builder: (context, constraints) {
                               double width = constraints.maxWidth;
+                              
                               int start = int.tryParse(g['startCtrl'].text) ?? 0;
                               int end = int.tryParse(g['endCtrl'].text) ?? 0;
                               int yellow = int.tryParse(g['yellowCtrl'].text) ?? 3;
+                              int allRed = int.tryParse(g['allRedCtrl'].text) ?? 2;
                               
-                              double startPx = (start / tc) * width;
-                              double endPx = (end / tc) * width;
+                              int greenDuration = end >= start ? end - start : (tc - start) + end;
+                              int yellowDuration = yellow;
                               
-                              bool cruzaVerde = end < start;
+                              int redDuration = tc - greenDuration - yellowDuration;
+                              if (redDuration < 0) redDuration = 0; 
+                              
+                              int greenStart = start;
+                              int yellowStart = (start + greenDuration) % tc;
+                              int redStart = (start + greenDuration + yellowDuration) % tc;
                               
                               List<Widget> barras = [];
+                              double barHeight = 24.0; 
                               
-                              barras.add(Center(child: Container(height: 6, color: Colors.red.shade600)));
-
-                              if (!cruzaVerde) {
-                                barras.add(Positioned(left: startPx, width: endPx - startPx, child: Center(child: Container(height: 16, color: const Color(0xFF00b050)))));
-                              } else {
-                                barras.add(Positioned(left: startPx, right: 0, child: Center(child: Container(height: 16, color: const Color(0xFF00b050)))));
-                                barras.add(Positioned(left: 0, width: endPx, child: Center(child: Container(height: 16, color: const Color(0xFF00b050)))));
-                              }
-
-                              int endY = end + yellow;
-                              if (endY <= tc) {
-                                barras.add(Positioned(left: endPx, width: (yellow / tc) * width, child: Center(child: Container(height: 16, color: const Color(0xFFffc000)))));
-                              } else {
-                                double w1 = width - endPx;
-                                double w2 = ((endY - tc) / tc) * width;
-                                barras.add(Positioned(left: endPx, right: 0, child: Center(child: Container(height: 16, color: const Color(0xFFffc000)))));
-                                barras.add(Positioned(left: 0, width: w2, child: Center(child: Container(height: 16, color: const Color(0xFFffc000)))));
-                              }
+                              barras.addAll(_drawSegment(redStart.toDouble(), redDuration.toDouble(), tc.toDouble(), width, barHeight, const Color(0xFFe74c3c), true));
+                              barras.addAll(_drawSegment(greenStart.toDouble(), greenDuration.toDouble(), tc.toDouble(), width, barHeight, const Color(0xFF00b050), false, text: greenDuration.toString()));
+                              barras.addAll(_drawSegment(yellowStart.toDouble(), yellowDuration.toDouble(), tc.toDouble(), width, barHeight, const Color(0xFFffc000), false));
 
                               return Stack(children: barras);
                             },
@@ -361,7 +449,6 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
   }
 }
 
-
 // ==========================================
 // TELA PRINCIPAL (APP)
 // ==========================================
@@ -378,11 +465,12 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
   bool _existeProgramacao = false;
 
   String _subarea = "---";
+  List<String> _listaSubareas = [];
+  
   // ignore: unused_field
   String _ultimaAtualizacao = "";
   // ignore: unused_field
   String _motivoEdicao = "";
-  // ignore: unused_field
   String _observacoes = "";
 
   List<dynamic> _grupos = [];
@@ -395,6 +483,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
   @override
   void initState() {
     super.initState();
+    _carregarSubareasBanco();
     _carregarSemaforosBanco();
   }
 
@@ -408,12 +497,39 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     return paleta[idNum % paleta.length];
   }
 
+  void _ordenarPlanos() {
+    _planos.sort((a, b) {
+      String idA = a['planId'].toString().toUpperCase();
+      String idB = b['planId'].toString().toUpperCase();
+      
+      if (idA == 'PISCANTE' && idB == 'APAGADO') return -1;
+      if (idA == 'APAGADO' && idB == 'PISCANTE') return 1;
+      if (idA == 'PISCANTE' || idA == 'APAGADO') return 1;
+      if (idB == 'PISCANTE' || idB == 'APAGADO') return -1;
+
+      int numA = int.tryParse(idA.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+      int numB = int.tryParse(idB.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+      return numA.compareTo(numB);
+    });
+  }
+
+  Future<void> _carregarSubareasBanco() async {
+    try {
+      final snap = await FirebaseFirestore.instance.collection('subareas').get();
+      List<String> subs = snap.docs.map((d) => d['nome'].toString()).toList();
+      subs.sort();
+      if (mounted) setState(() { _listaSubareas = subs; });
+    } catch(e) {
+      debugPrint("Erro ao buscar subareas: $e");
+    }
+  }
+
   Future<void> _carregarSemaforosBanco() async {
     try {
       final snap = await FirebaseFirestore.instance.collection('semaforos').get();
       List<Map<String, String>> listaTemporaria = [];
 
-      listaTemporaria.add({'value': 'DEMO', 'label': '000 - SEMÁFORO DEMO (Teste Visual)'});
+      listaTemporaria.add({'value': 'DEMO', 'label': '000 - SEMÁFORO DEMO (Teste Visual)', 'subarea': '---'});
 
       for (var doc in snap.docs) {
         var d = doc.data();
@@ -424,8 +540,10 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
           if (numeros.isNotEmpty) idFormatado = numeros.padLeft(3, '0');
         }
         String endereco = (d['endereco'] ?? '').toString();
+        String subDb = (d['subarea'] ?? '').toString();
+
         if (idFormatado != '000' && endereco.isNotEmpty) {
-          listaTemporaria.add({'value': doc.id, 'label': '$idFormatado - $endereco'});
+          listaTemporaria.add({'value': doc.id, 'label': '$idFormatado - $endereco', 'subarea': subDb.isNotEmpty ? subDb : '---'});
         }
       }
 
@@ -452,8 +570,8 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
           _grupos = data['grupos'] ?? [];
           _planos = data['planos'] ?? [];
           _agendamento = data['agendamento'] ?? {};
-          _subarea = data['subarea'] ?? "---";
           _observacoes = data['observacoes'] ?? "";
+          _ordenarPlanos();
         });
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Programação carregada!'), backgroundColor: Colors.green, duration: Duration(seconds: 1)));
       } else {
@@ -473,19 +591,22 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
         {
           'planId': '01', 'type': 'normal', 'tc': 120, 'offset': 0,
           'groups': [
-            {'id': 'G1', 'name': 'G1', 'start': 0, 'end': 95, 'yellow': 4, 'allRed': 1},
-            {'id': 'G2', 'name': 'G2', 'start': 100, 'end': 113, 'yellow': 6, 'allRed': 1},
+            {'id': 'G1', 'name': 'G1', 'start': 0, 'end': 55, 'yellow': 3, 'allRed': 2},
+            {'id': 'G2', 'name': 'G2', 'start': 60, 'end': 115, 'yellow': 3, 'allRed': 2},
           ],
         },
         {'planId': 'piscante', 'type': 'special'},
+        {'planId': 'apagado', 'type': 'special'},
       ];
+      _ordenarPlanos();
       _agendamento = {'seg': [{'hora': '06:00', 'nomePlano': 'PLANO 01'}, {'hora': '22:00', 'nomePlano': 'MODO PISCANTE'}]};
+      _observacoes = "Neste modo, os tempos de verde funcionam com precisão e cruzam o ciclo, se necessário.";
     });
   }
 
   void _limparTela() {
     setState(() {
-      _existeProgramacao = false; _modoEdicao = false; _subarea = "---";
+      _existeProgramacao = false; _modoEdicao = false; 
       _ultimaAtualizacao = ""; _motivoEdicao = ""; _observacoes = "";
       _grupos = []; _planos = []; _agendamento = {};
     });
@@ -495,7 +616,396 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     setState(() => _modoEdicao = !_modoEdicao);
   }
 
+  // ==========================================
+  // FUNÇÃO: ZERAR TUDO
+  // ==========================================
+  void _zerarTudo() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Zerar Programação', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+        content: const Text('Tem certeza que deseja ZERAR toda a programação deste semáforo?\nIsso apagará os grupos, planos e agendamentos definitivamente do banco de dados.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar', style: TextStyle(color: Colors.black87))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              if (_semaforoSelecionado != 'DEMO' && _semaforoSelecionado != null) {
+                await FirebaseFirestore.instance.collection('programacao').doc(_semaforoSelecionado).delete();
+              }
+              _limparTela();
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Programação zerada com sucesso!'), backgroundColor: Colors.orange));
+            },
+            child: const Text('Sim, Zerar Tudo', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          )
+        ]
+      )
+    );
+  }
+
+  // ==========================================
+  // FUNÇÃO: CONVERTER COLOR PARA PDFCOLOR
+  // ==========================================
+  PdfColor _getPdfColor(Color c) {
+    return PdfColor(c.red / 255.0, c.green / 255.0, c.blue / 255.0);
+  }
+
+  // ==========================================
+  // FUNÇÃO: EXPORTAR PARA PDF
+  // ==========================================
+  Future<void> _exportarPdf() async {
+    if (_semaforoSelecionado == null) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: Colors.red)),
+    );
+
+    try {
+      final pdf = pw.Document();
+      final dataHoraAtual = DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now());
+      
+      String semaforoLabel = _listaSemaforosDropdown.firstWhere(
+          (e) => e['value'] == _semaforoSelecionado, 
+          orElse: () => {'label': _semaforoSelecionado!}
+      )['label']!;
+
+      pw.Widget buildPdfGantt(List groups, int tc) {
+        double ganttWidth = 280.0; 
+        double rowHeight = 18.0; 
+        double rulerHeight = 15.0;
+
+        List<pw.Widget> stackChildren = [];
+
+        stackChildren.add(
+          pw.Positioned(
+            left: 0, top: rulerHeight,
+            child: pw.Container(width: ganttWidth, height: 1, color: PdfColors.grey600)
+          )
+        );
+
+        for (int i = 0; i <= tc; i++) {
+          double x = (i / tc) * ganttWidth;
+          if (i % 10 == 0) {
+            stackChildren.add(pw.Positioned(left: x, top: rulerHeight - 5, child: pw.Container(width: 1, height: 5, color: PdfColors.grey800)));
+            double dx = x - 4;
+            if (i == tc) dx = x - 10;
+            if (i == 0) dx = 0;
+            stackChildren.add(pw.Positioned(left: dx, top: 0, child: pw.Text('$i', style: pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold))));
+          } else if (i % 5 == 0) {
+            stackChildren.add(pw.Positioned(left: x, top: rulerHeight - 3, child: pw.Container(width: 0.5, height: 3, color: PdfColors.grey600)));
+          }
+        }
+
+        double currentY = rulerHeight + 5;
+
+        for (var g in groups) {
+           int start = int.tryParse(g['start']?.toString() ?? '0') ?? 0;
+           int end = int.tryParse(g['end']?.toString() ?? '0') ?? 0;
+           int yellow = int.tryParse(g['yellow']?.toString() ?? '3') ?? 3;
+           int allRed = int.tryParse(g['allRed']?.toString() ?? '2') ?? 2;
+
+           int greenDuration = end >= start ? end - start : (tc - start) + end;
+           int yellowDuration = yellow;
+           int redDuration = tc - greenDuration - yellowDuration;
+           if (redDuration < 0) redDuration = 0;
+
+           int greenStart = start;
+           int yellowStart = (start + greenDuration) % tc;
+           int redStart = (start + greenDuration + yellowDuration) % tc;
+
+           void addSegment(double st, double dur, PdfColor color, [String? txt]) {
+              if (dur <= 0) return;
+              double s = st % tc;
+              if (s < 0) s += tc;
+              
+              if (s + dur <= tc) {
+                 stackChildren.add(
+                   pw.Positioned(
+                     left: (s / tc) * ganttWidth, top: currentY,
+                     child: pw.Container(width: (dur / tc) * ganttWidth, height: 12, color: color, alignment: pw.Alignment.center, child: txt != null ? pw.Text(txt, style: pw.TextStyle(color: PdfColors.white, fontSize: 6, fontWeight: pw.FontWeight.bold)) : null)
+                   )
+                 );
+              } else {
+                 double d1 = tc - s;
+                 double d2 = dur - d1;
+                 stackChildren.add(
+                   pw.Positioned(
+                     left: (s / tc) * ganttWidth, top: currentY,
+                     child: pw.Container(width: (d1 / tc) * ganttWidth, height: 12, color: color, alignment: pw.Alignment.center, child: txt != null ? pw.Text(txt, style: pw.TextStyle(color: PdfColors.white, fontSize: 6, fontWeight: pw.FontWeight.bold)) : null)
+                   )
+                 );
+                 stackChildren.add(
+                   pw.Positioned(
+                     left: 0, top: currentY,
+                     child: pw.Container(width: (d2 / tc) * ganttWidth, height: 12, color: color)
+                   )
+                 );
+              }
+           }
+
+           addSegment(redStart.toDouble(), redDuration.toDouble(), PdfColor.fromHex('#e74c3c'));
+           addSegment(greenStart.toDouble(), greenDuration.toDouble(), PdfColor.fromHex('#00b050'), greenDuration.toString());
+           addSegment(yellowStart.toDouble(), yellowDuration.toDouble(), PdfColor.fromHex('#ffc000'));
+
+           currentY += rowHeight;
+        }
+
+        return pw.SizedBox(
+          width: ganttWidth,
+          height: currentY,
+          child: pw.Stack(children: stackChildren)
+        );
+      }
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(30),
+          header: (context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text('Ficha de Programação Semafórica', style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey900)),
+              pw.Text('Gerado pelo Sistema SOS em $dataHoraAtual', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+              pw.Divider(),
+              pw.SizedBox(height: 10),
+            ]
+          ),
+          footer: (context) => pw.Container(
+            alignment: pw.Alignment.centerRight,
+            margin: const pw.EdgeInsets.only(top: 10),
+            child: pw.Text('Página ${context.pageNumber} de ${context.pagesCount}', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+          ),
+          build: (context) {
+            return [
+              pw.Text('Semáforo: $semaforoLabel', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+              pw.Text('Subárea: $_subarea', style: const pw.TextStyle(fontSize: 12)),
+              pw.SizedBox(height: 15),
+
+              if (_grupos.isNotEmpty) ...[
+                pw.Text('Configuração de Grupos', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.black)),
+                pw.SizedBox(height: 4),
+                ..._grupos.map((g) => pw.Text('${g['id']}: ${g['nome']}', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey800))),
+                pw.SizedBox(height: 20),
+              ],
+
+              if (_agendamento.isNotEmpty) ...[
+                pw.Text('AGENDAMENTO SEMANAL', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.black),),
+                pw.SizedBox(height: 8),
+                pw.Container(
+                  decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey300)),
+                  child: pw.Row(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start, 
+                    children: ['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'].map((dia) {
+                       List eventos = _agendamento[dia] ?? [];
+                       String nomeDia = {'seg':'SEGUNDA','ter':'TERÇA','qua':'QUARTA','qui':'QUINTA','sex':'SEXTA','sab':'SÁBADO','dom':'DOMINGO'}[dia]!;
+                       return pw.Expanded(
+                         child: pw.Container(
+                           decoration: pw.BoxDecoration(border: pw.Border(right: pw.BorderSide(color: PdfColors.grey300))),
+                           child: pw.Column(
+                             children: [
+                               pw.Container(width: double.infinity, padding: const pw.EdgeInsets.all(4), color: PdfColors.grey200, child: pw.Text(nomeDia, textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey900))),
+                               ...eventos.map((ev) {
+                                   String planoIdEv = ev['nomePlano'].toString().replaceAll('PLANO ', '').replaceAll('MODO ', '');
+                                   Color c = _obterCorDoPlano(planoIdEv);
+                                   PdfColor pdfColorBordaETexto = _getPdfColor(c);
+                                   
+                                   String nomeExibicaoPdf = ev['nomePlano'].toString();
+                                   if (nomeExibicaoPdf == 'MODO PISCANTE') nomeExibicaoPdf = 'MODO\nPISCANTE';
+                                   if (nomeExibicaoPdf == 'MODO APAGADO') nomeExibicaoPdf = 'MODO\nAPAGADO';
+
+                                   return pw.Container(
+                                     margin: const pw.EdgeInsets.all(4), padding: const pw.EdgeInsets.all(4),
+                                     decoration: pw.BoxDecoration(color: PdfColors.white, border: pw.Border.all(color: pdfColorBordaETexto, width: 1.5), borderRadius: pw.BorderRadius.circular(4)),
+                                     child: pw.Column(children: [
+                                       pw.Text(ev['hora'], style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.black)),
+                                       pw.SizedBox(height: 2), 
+                                       pw.Text(nomeExibicaoPdf, textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold, color: pdfColorBordaETexto)),
+                                     ])
+                                   );
+                               })
+                             ]
+                           )
+                         )
+                       );
+                    }).toList()
+                  )
+                ),
+                pw.SizedBox(height: 20),
+              ],
+
+              if (_planos.isNotEmpty) ...[
+                pw.Text('TEMPOS DOS PLANOS', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.black)),
+                pw.SizedBox(height: 8),
+                ..._planos.map((p) {
+                  String tipoStr = p['type']?.toString() ?? 'normal';
+                  String planIdStr = p['planId']?.toString().toUpperCase() ?? '??';
+                  
+                  if (tipoStr == 'special') {
+                    return pw.Container(
+                      margin: const pw.EdgeInsets.only(bottom: 10),
+                      padding: const pw.EdgeInsets.all(8),
+                      decoration: pw.BoxDecoration(color: PdfColors.grey800, borderRadius: pw.BorderRadius.circular(4)),
+                      child: pw.Text('MODO $planIdStr', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white)),
+                    );
+                  }
+
+                  int tc = p['tc'] ?? 100;
+                  List groups = p['groups'] ?? [];
+
+                  return pw.Container(
+                    margin: const pw.EdgeInsets.only(bottom: 15),
+                    decoration: pw.BoxDecoration(
+                      border: pw.Border.all(color: PdfColors.grey300),
+                      borderRadius: pw.BorderRadius.circular(4)
+                    ),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                      children: [
+                        pw.Container(
+                          padding: const pw.EdgeInsets.all(6),
+                          decoration: const pw.BoxDecoration(color: PdfColors.grey800),
+                          child: pw.Text('PLANO $planIdStr   |   Ciclo: ${tc}s   |   Offset: ${p['offset'] ?? 0}s', style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 10))
+                        ),
+                        pw.Row(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Container(
+                              width: 235, // Largura Expandida para evitar quebra de linha
+                              padding: const pw.EdgeInsets.all(4),
+                              child: groups.isNotEmpty 
+                                ? pw.TableHelper.fromTextArray(
+                                    cellPadding: const pw.EdgeInsets.all(2), 
+                                    columnWidths: {
+                                      0: const pw.FlexColumnWidth(1.2), // Grupo
+                                      1: const pw.FlexColumnWidth(1.0), // Início
+                                      2: const pw.FlexColumnWidth(1.0), // Fim
+                                      3: const pw.FlexColumnWidth(1.2), // Verde
+                                      4: const pw.FlexColumnWidth(1.6), // Amarelo
+                                      5: const pw.FlexColumnWidth(1.8), // Vm.Geral
+                                      6: const pw.FlexColumnWidth(2.0), // Entreverde
+                                    },
+                                    headers: ['Grupo', 'Início', 'Fim', 'Verde', 'Amarelo', 'Vm.Geral', 'Entreverde'],
+                                    data: groups.map((g) {
+                                      int start = g['start'] ?? 0;
+                                      int end = g['end'] ?? 0;
+                                      int yellow = g['yellow'] ?? 3;
+                                      int allRed = g['allRed'] ?? 2;
+                                      int verde = end >= start ? end - start : (tc - start) + end;
+                                      int entreverde = yellow + allRed;
+                                      return [g['id'].toString(), start.toString(), end.toString(), verde.toString(), yellow.toString(), allRed.toString(), entreverde.toString()];
+                                    }).toList(),
+                                    headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey800, fontSize: 7),
+                                    headerDecoration: const pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: PdfColors.grey300))),
+                                    cellStyle: const pw.TextStyle(fontSize: 8, color: PdfColors.grey800),
+                                    cellAlignment: pw.Alignment.center,
+                                  )
+                                : pw.Text('Nenhum grupo de verde configurado.', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey))
+                            ),
+                            pw.Container(
+                              width: 296, 
+                              padding: const pw.EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4),
+                              child: buildPdfGantt(groups, tc)
+                            )
+                          ]
+                        )
+                      ]
+                    )
+                  );
+                }),
+                pw.SizedBox(height: 20),
+              ],
+
+              if (_observacoes.isNotEmpty) ...[
+                pw.Text('OBSERVAÇÕES DO PROJETO', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.black)),
+                pw.SizedBox(height: 8),
+                pw.Container(
+                  width: double.infinity,
+                  padding: const pw.EdgeInsets.all(10),
+                  decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey300), borderRadius: pw.BorderRadius.circular(4)),
+                  child: pw.Text(_observacoes, style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey900))
+                )
+              ]
+            ];
+          }
+        )
+      );
+
+      if (mounted) Navigator.pop(context); 
+      
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdf.save(), 
+        name: 'Programacao_Semaforo_$semaforoLabel.pdf'
+      );
+
+    } catch (e) {
+      if (mounted) Navigator.pop(context); 
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao gerar PDF: $e'), backgroundColor: Colors.red));
+    }
+  }
+
+  // ==========================================
+  // MODAL OBSERVAÇÕES
+  // ==========================================
+  void _abrirModalObservacoes() {
+    final TextEditingController obsController = TextEditingController(text: _observacoes);
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          titlePadding: const EdgeInsets.only(left: 24, right: 8, top: 16, bottom: 8),
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Observações do Projeto', style: TextStyle(color: Colors.purple, fontWeight: FontWeight.bold, fontSize: 18)),
+              IconButton(icon: const Icon(Icons.close, color: Colors.grey), onPressed: () => Navigator.pop(context)),
+            ],
+          ),
+          content: Container(
+            width: 400,
+            padding: const EdgeInsets.only(top: 16),
+            decoration: const BoxDecoration(border: Border(top: BorderSide(color: Colors.black12, width: 1))),
+            child: TextField(
+              controller: obsController,
+              enabled: _modoEdicao,
+              maxLines: 5,
+              decoration: InputDecoration(
+                hintText: _modoEdicao ? 'Digite as anotações e observações da programação...' : 'Sem observações cadastradas.',
+                border: const OutlineInputBorder(),
+                filled: true,
+                fillColor: _modoEdicao ? Colors.white : Colors.grey.shade100,
+              ),
+            ),
+          ),
+          actionsPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context), 
+              child: Text(_modoEdicao ? 'Cancelar' : 'Fechar', style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold))
+            ),
+            if (_modoEdicao)
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.purple),
+                onPressed: () {
+                  setState(() { _observacoes = obsController.text.trim(); });
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Observação armazenada! Lembre-se de salvar a programação.'), backgroundColor: Colors.green));
+                },
+                child: const Text('Confirmar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+          ],
+        );
+      }
+    );
+  }
+
+  // ==========================================
   // MODAL DEFINIR GRUPOS
+  // ==========================================
   void _abrirModalDefinirGrupos() {
     int passoAtual = 1; int quantidadeGrupos = 0; bool salvando = false;
     final TextEditingController qtdController = TextEditingController();
@@ -565,18 +1075,34 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                       }
                       if (!camposValidos) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preencha todos os grupos.'), backgroundColor: Colors.red)); return; }
 
+                      List<Map<String, dynamic>> planosIniciais = [
+                        {
+                          'planId': '01', 'type': 'normal', 'tc': 100, 'offset': 0,
+                          'groups': novosGrupos.map((g) => {
+                            'id': g['id'], 'name': g['nome'], 'start': 0, 'end': 0, 'yellow': 3, 'allRed': 2
+                          }).toList()
+                        },
+                        {'planId': 'piscante', 'type': 'special'},
+                        {'planId': 'apagado', 'type': 'special'},
+                      ];
+
                       if (_semaforoSelecionado == 'DEMO') {
-                         setState(() { _grupos = novosGrupos; _existeProgramacao = true; });
+                         setState(() { _grupos = novosGrupos; _planos = planosIniciais; _existeProgramacao = true; _ordenarPlanos(); });
                          Navigator.pop(context); return;
                       }
 
                       setModalState(() => salvando = true);
                       try {
                         await FirebaseFirestore.instance.collection('programacao').doc(_semaforoSelecionado).set({
-                          'semaforo_id': _semaforoSelecionado, 'grupos': novosGrupos, 'ultima_atualizacao': FieldValue.serverTimestamp(),
+                          'semaforo_id': _semaforoSelecionado, 
+                          'grupos': novosGrupos, 
+                          'planos': planosIniciais, 
+                          'ultima_atualizacao': FieldValue.serverTimestamp(),
                         }, SetOptions(merge: true));
-                        setState(() { _grupos = novosGrupos; _existeProgramacao = true; });
+                        
+                        setState(() { _grupos = novosGrupos; _planos = planosIniciais; _existeProgramacao = true; _ordenarPlanos(); });
                         if (mounted) Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Grupos e planos padrões criados!'), backgroundColor: Colors.green));
                       } catch (e) {
                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red));
                         setModalState(() => salvando = false);
@@ -593,7 +1119,9 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     );
   }
 
+  // ==========================================
   // MODAL DEFINIR PLANO
+  // ==========================================
   void _abrirModalDefinirPlano() {
     final formKey = GlobalKey<FormState>();
     String? planoSelecionado;
@@ -602,8 +1130,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     final vGeralCtrl = TextEditingController(text: '2');
     bool salvando = false;
 
-    List<String> opcoesPlano = List.generate(15, (i) => (i + 1).toString().padLeft(2, '0'));
-    opcoesPlano.addAll(['PISCANTE', 'APAGADO']);
+    List<String> opcoesPlano = List.generate(14, (i) => (i + 2).toString().padLeft(2, '0'));
 
     showDialog(
       context: context, barrierDismissible: false,
@@ -613,7 +1140,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
             return AlertDialog(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               titlePadding: const EdgeInsets.only(left: 24, right: 8, top: 16, bottom: 8),
-              title: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Adicionar Novo Plano', style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold, fontSize: 18)), IconButton(icon: const Icon(Icons.close, color: Colors.grey), onPressed: () => Navigator.pop(context))]),
+              title: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Adicionar Plano Extra', style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold, fontSize: 18)), IconButton(icon: const Icon(Icons.close, color: Colors.grey), onPressed: () => Navigator.pop(context))]),
               content: Container(
                 width: 500, padding: const EdgeInsets.only(top: 8), decoration: const BoxDecoration(border: Border(top: BorderSide(color: Colors.black12, width: 1))),
                 child: Form(
@@ -649,7 +1176,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                       
                       Map<String, dynamic> novoPlano = {
                         'planId': planoSelecionado,
-                        'type': (planoSelecionado == 'PISCANTE' || planoSelecionado == 'APAGADO') ? 'special' : 'normal',
+                        'type': 'normal',
                         'tc': int.tryParse(tcCtrl.text) ?? 100,
                         'offset': 0,
                         'groups': _grupos.map((g) => {
@@ -666,7 +1193,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                       novaListaPlanos.add(novoPlano);
 
                       if (_semaforoSelecionado == 'DEMO') {
-                         setState(() { _planos = novaListaPlanos; _existeProgramacao = true; });
+                         setState(() { _planos = novaListaPlanos; _existeProgramacao = true; _ordenarPlanos(); });
                          Navigator.pop(context); return;
                       }
 
@@ -674,7 +1201,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                         await FirebaseFirestore.instance.collection('programacao').doc(_semaforoSelecionado).set({
                           'semaforo_id': _semaforoSelecionado, 'planos': novaListaPlanos, 'ultima_atualizacao': FieldValue.serverTimestamp(),
                         }, SetOptions(merge: true));
-                        setState(() { _planos = novaListaPlanos; _existeProgramacao = true; });
+                        setState(() { _planos = novaListaPlanos; _existeProgramacao = true; _ordenarPlanos(); });
                         if (mounted) Navigator.pop(context);
                       } catch (e) {
                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red));
@@ -692,7 +1219,96 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     );
   }
 
+  // ==========================================
+  // FUNÇÃO: EDITAR AGENDAMENTO EXISTENTE (NA TELA)
+  // ==========================================
+  void _editarAgendamentoExistente(String dia, int index, Map ev) {
+    String horaAtual = ev['hora'].split(':')[0];
+    String minAtual = ev['hora'].split(':')[1];
+    String planoAtual = ev['nomePlano'].toString().replaceAll('PLANO ', '').replaceAll('MODO ', '').trim();
+    
+    List<String> horasStr = List.generate(24, (i) => i.toString().padLeft(2, '0'));
+    List<String> minutosStr = List.generate(60, (i) => i.toString().padLeft(2, '0'));
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return AlertDialog(
+            title: Text('Editar Horário (${{'seg':'Segunda','ter':'Terça','qua':'Quarta','qui':'Quinta','sex':'Sexta','sab':'Sábado','dom':'Domingo'}[dia]})'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    DropdownButton<String>(
+                      value: horaAtual,
+                      items: horasStr.map((h) => DropdownMenuItem(value: h, child: Text(h))).toList(),
+                      onChanged: (val) => setDialogState(() => horaAtual = val!)
+                    ),
+                    const Text(' : ', style: TextStyle(fontWeight: FontWeight.bold)),
+                    DropdownButton<String>(
+                      value: minAtual,
+                      items: minutosStr.map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+                      onChanged: (val) => setDialogState(() => minAtual = val!)
+                    ),
+                  ]
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+                  value: _planos.any((p) => p['planId'] == planoAtual) ? planoAtual : null,
+                  items: _planos.map((p) {
+                    String pId = p['planId'].toString();
+                    return DropdownMenuItem(value: pId, child: Text(p['type'] == 'special' ? 'MODO $pId' : 'PLANO $pId'));
+                  }).toList(),
+                  onChanged: (val) => setDialogState(() => planoAtual = val!)
+                )
+              ]
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                   setState(() { _agendamento[dia].removeAt(index); });
+                   Navigator.pop(ctx);
+                },
+                child: const Text('🗑️ Excluir Horário', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))
+              ),
+              ElevatedButton(
+                onPressed: () {
+                   String novoNome = _planos.firstWhere((p) => p['planId'] == planoAtual)['type'] == 'special' ? 'MODO $planoAtual' : 'PLANO $planoAtual';
+                   String novaHora = '$horaAtual:$minAtual';
+                   
+                   // Checa se já existe esse horário no dia (ignorando ele mesmo)
+                   bool jaExiste = false;
+                   for(int i=0; i<_agendamento[dia].length; i++) {
+                     if (i != index && _agendamento[dia][i]['hora'] == novaHora) jaExiste = true;
+                   }
+                   
+                   if (jaExiste) {
+                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Já existe um plano neste horário!'), backgroundColor: Colors.red));
+                     return;
+                   }
+                   
+                   setState(() {
+                      _agendamento[dia][index] = {'hora': novaHora, 'nomePlano': novoNome};
+                      _agendamento[dia].sort((a, b) => a['hora'].compareTo(b['hora']));
+                   });
+                   Navigator.pop(ctx);
+                },
+                child: const Text('Salvar')
+              )
+            ]
+          );
+        }
+      )
+    );
+  }
+
+  // ==========================================
   // MODAL AGENDAMENTO
+  // ==========================================
   void _abrirModalAgendamento() {
     String horaSelecionada = '12'; String minutoSelecionado = '00'; String diaMarcado = 'Todos os dias'; String? planoMarcado; bool salvando = false;
     Map<String, List<dynamic>> agendamentoTemp = {};
@@ -787,7 +1403,11 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                                                       padding: const EdgeInsets.symmetric(vertical: 4),
                                                       children: _planos.map((p) {
                                                         String pId = p['planId'].toString();
-                                                        return RadioListTile<String>(title: Text((p['type'] == 'special') ? 'MODO $pId' : 'PLANO $pId', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)), value: pId, groupValue: planoMarcado, dense: true, visualDensity: VisualDensity.compact, contentPadding: const EdgeInsets.only(left: 4), activeColor: Colors.green, onChanged: (val) => setModalState(() => planoMarcado = val!));
+                                                        String nomeOpcao = (p['type'] == 'special') ? 'MODO $pId' : 'PLANO $pId';
+                                                        if (nomeOpcao == 'MODO PISCANTE') nomeOpcao = 'MODO\nPISCANTE';
+                                                        if (nomeOpcao == 'MODO APAGADO') nomeOpcao = 'MODO\nAPAGADO';
+
+                                                        return RadioListTile<String>(title: Text(nomeOpcao, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)), value: pId, groupValue: planoMarcado, dense: true, visualDensity: VisualDensity.compact, contentPadding: const EdgeInsets.only(left: 4), activeColor: Colors.green, onChanged: (val) => setModalState(() => planoMarcado = val!));
                                                       }).toList(),
                                                     ),
                                               )
@@ -805,10 +1425,17 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                                     if (planoMarcado == null) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione um plano primeiro!'), backgroundColor: Colors.red)); return; }
                                     String horaFinal = '$horaSelecionada:$minutoSelecionado';
                                     String nomeParaSalvar = (_planos.firstWhere((p) => p['planId'] == planoMarcado)['type'] == 'special') ? 'MODO $planoMarcado' : 'PLANO $planoMarcado';
+                                    
                                     setModalState(() {
                                       for (String diaChave in _obterChavesDias(diaMarcado)) {
-                                        agendamentoTemp[diaChave]!.add({'hora': horaFinal, 'nomePlano': nomeParaSalvar});
-                                        agendamentoTemp[diaChave]!.sort((a, b) => a['hora'].compareTo(b['hora']));
+                                        // VERIFICAÇÃO DE HORÁRIO DUPLICADO
+                                        bool timeExists = agendamentoTemp[diaChave]!.any((ev) => ev['hora'] == horaFinal);
+                                        if (timeExists) {
+                                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('O horário $horaFinal já possui um plano configurado para este dia!'), backgroundColor: Colors.red));
+                                        } else {
+                                          agendamentoTemp[diaChave]!.add({'hora': horaFinal, 'nomePlano': nomeParaSalvar});
+                                          agendamentoTemp[diaChave]!.sort((a, b) => a['hora'].compareTo(b['hora']));
+                                        }
                                       }
                                     });
                                   },
@@ -843,13 +1470,18 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                                                         var ev = eventosDoDia[index];
                                                         String planoIdEv = ev['nomePlano'].toString().replaceAll('PLANO ', '').replaceAll('MODO ', '');
                                                         Color corEvento = _obterCorDoPlano(planoIdEv);
+                                                        
+                                                        String nomeExibicao = ev['nomePlano'].toString();
+                                                        if (nomeExibicao == 'MODO PISCANTE') nomeExibicao = 'MODO\nPISCANTE';
+                                                        if (nomeExibicao == 'MODO APAGADO') nomeExibicao = 'MODO\nAPAGADO';
+
                                                         return Container(
                                                           margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(8),
                                                           decoration: BoxDecoration(color: corEvento.withValues(alpha: 0.1), border: Border.all(color: corEvento.withValues(alpha: 0.5)), borderRadius: BorderRadius.circular(6)),
                                                           child: Column(
                                                             children: [
                                                               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(ev['hora'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87)), InkWell(onTap: () { setModalState(() { agendamentoTemp[diaChave]!.removeAt(index); }); }, child: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent))]),
-                                                              const SizedBox(height: 4), Text(ev['nomePlano'], textAlign: TextAlign.center, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: corEvento)),
+                                                              const SizedBox(height: 4), Text(nomeExibicao, textAlign: TextAlign.center, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: corEvento)),
                                                             ],
                                                           ),
                                                         );
@@ -935,7 +1567,9 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
         'grupos': _grupos,
         'planos': _planos,
         'agendamento': _agendamento,
+        'observacoes': _observacoes,
         'ultima_atualizacao': FieldValue.serverTimestamp(),
+        'subarea': _subarea // Salva a subárea no documento se houver alteração
       }, SetOptions(merge: true));
 
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Toda a programação foi salva com sucesso!'), backgroundColor: Colors.green));
@@ -989,15 +1623,71 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                                     if (_carregandoSemaforos)
                                       const LinearProgressIndicator(color: Colors.orange)
                                     else
-                                      DropdownButtonFormField<String>(
-                                        decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true, fillColor: Color(0xFFf8f9fa), filled: true),
-                                        value: _semaforoSelecionado,
-                                        hint: const Text('Selecione...', style: TextStyle(fontStyle: FontStyle.italic)),
-                                        isExpanded: true, 
-                                        items: _listaSemaforosDropdown.map((item) => DropdownMenuItem<String>(value: item['value'], child: Text(item['label']!, style: TextStyle(fontWeight: item['value'] == 'DEMO' ? FontWeight.bold : FontWeight.normal, color: item['value'] == 'DEMO' ? Colors.blueGrey : Colors.black87), overflow: TextOverflow.ellipsis))).toList(),
-                                        onChanged: (val) {
-                                          setState(() => _semaforoSelecionado = val);
-                                          if (val == 'DEMO') { _carregarDemo(); } else if (val != null) { _carregarProgramacaoDoSemaforo(val); }
+                                      Autocomplete<Map<String, String>>(
+                                        optionsBuilder: (TextEditingValue textEditingValue) {
+                                          if (textEditingValue.text == '') {
+                                            return _listaSemaforosDropdown;
+                                          }
+                                          return _listaSemaforosDropdown.where((Map<String, String> option) {
+                                            return option['label']!.toLowerCase().contains(textEditingValue.text.toLowerCase());
+                                          });
+                                        },
+                                        displayStringForOption: (Map<String, String> option) => option['label']!,
+                                        onSelected: (Map<String, String> selection) {
+                                          setState(() {
+                                            _semaforoSelecionado = selection['value'];
+                                            if (_semaforoSelecionado == 'DEMO') {
+                                              _carregarDemo();
+                                            } else {
+                                              var selectedItem = _listaSemaforosDropdown.firstWhere((item) => item['value'] == _semaforoSelecionado);
+                                              _subarea = selectedItem['subarea'] ?? "---";
+                                              _carregarProgramacaoDoSemaforo(_semaforoSelecionado!);
+                                            }
+                                          });
+                                        },
+                                        fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+                                          if (_semaforoSelecionado != null && textEditingController.text.isEmpty) {
+                                             var item = _listaSemaforosDropdown.firstWhere((e) => e['value'] == _semaforoSelecionado, orElse: () => {'label':''});
+                                             textEditingController.text = item['label']!;
+                                          }
+                                          return TextField(
+                                            controller: textEditingController,
+                                            focusNode: focusNode,
+                                            decoration: const InputDecoration(
+                                              border: OutlineInputBorder(),
+                                              isDense: true,
+                                              fillColor: Color(0xFFf8f9fa),
+                                              filled: true,
+                                              hintText: 'Pesquisar Semáforo...',
+                                              suffixIcon: Icon(Icons.search),
+                                            ),
+                                          );
+                                        },
+                                        optionsViewBuilder: (context, onSelected, options) {
+                                          return Align(
+                                            alignment: Alignment.topLeft,
+                                            child: Material(
+                                              elevation: 4.0,
+                                              child: ConstrainedBox(
+                                                constraints: const BoxConstraints(maxHeight: 250, maxWidth: 600),
+                                                child: ListView.builder(
+                                                  padding: EdgeInsets.zero,
+                                                  shrinkWrap: true,
+                                                  itemCount: options.length,
+                                                  itemBuilder: (BuildContext context, int index) {
+                                                    final Map<String, String> option = options.elementAt(index);
+                                                    return InkWell(
+                                                      onTap: () => onSelected(option),
+                                                      child: Padding(
+                                                        padding: const EdgeInsets.all(12.0),
+                                                        child: Text(option['label']!, style: TextStyle(fontWeight: option['value'] == 'DEMO' ? FontWeight.bold : FontWeight.normal)),
+                                                      ),
+                                                    );
+                                                  },
+                                                ),
+                                              ),
+                                            ),
+                                          );
                                         },
                                       ),
                                   ],
@@ -1005,7 +1695,27 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                               ),
                               const SizedBox(width: 20),
                               Expanded(flex: 1, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Grupos Atuais', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blueGrey)), const SizedBox(height: 4), if (_grupos.isEmpty) const Text('Nenhum grupo definido', style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey)), ..._grupos.map((g) => Text('${g['id']}: ${g['nome']}', style: const TextStyle(fontSize: 12, color: Colors.black87)))] )),
-                              Expanded(flex: 1, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Subárea', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blueGrey)), const SizedBox(height: 4), Text(_subarea, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blue))] )),
+                              Expanded(
+                                flex: 1, 
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start, 
+                                  children: [
+                                    const Text('Subárea', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blueGrey)), 
+                                    const SizedBox(height: 4), 
+                                    if (_modoEdicao && _listaSubareas.isNotEmpty)
+                                      DropdownButtonFormField<String>(
+                                        value: _listaSubareas.contains(_subarea) ? _subarea : null,
+                                        decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8)),
+                                        items: _listaSubareas.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                                        onChanged: (val) {
+                                          setState(() => _subarea = val ?? "---");
+                                        }
+                                      )
+                                    else
+                                      Text(_subarea, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blue))
+                                  ] 
+                                )
+                              ),
                             ],
                           ),
 
@@ -1018,13 +1728,14 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                                   _buildCustomButton('🚦 DEFINIR GRUPOS', Colors.orange, _abrirModalDefinirGrupos),
                                   _buildCustomButton('📝 DEFINIR PLANO', Colors.green, _abrirModalDefinirPlano),
                                   _buildCustomButton('📅 DEFINIR AGENDAMENTO', Colors.blue, _abrirModalAgendamento),
-                                  _buildCustomButton('📝 OBSERVAÇÕES', Colors.purple, () {}),
+                                  _buildCustomButton('📝 OBSERVAÇÕES', Colors.purple, _abrirModalObservacoes),
                                   _buildCustomButton('💾 SALVAR PROGRAMAÇÃO', Colors.deepPurple, _salvarProgramacaoCompleta),
                                 ],
                                 if (_existeProgramacao && !_modoEdicao) ...[
                                   _buildCustomButton('✏️ EDITAR PROGRAMAÇÃO', Colors.blueGrey, _alternarModoEdicao),
-                                  _buildCustomButton('📄 EXPORTAR PDF', Colors.red, () {}),
-                                  _buildCustomButton('🗑️ EXCLUIR TUDO', Colors.black87, () {}),
+                                  _buildCustomButton('📄 EXPORTAR PDF', Colors.red, _exportarPdf),
+                                  _buildCustomButton('📝 VER OBSERVAÇÕES', Colors.purple, _abrirModalObservacoes),
+                                  _buildCustomButton('🗑️ ZERAR TUDO', Colors.black87, _zerarTudo),
                                 ],
                                 if (_existeProgramacao && _modoEdicao) ...[
                                   _buildCustomButton('🚫 CANCELAR EDIÇÃO', Colors.redAccent, _alternarModoEdicao),
@@ -1055,13 +1766,28 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                                   child: Column(
                                     children: [
                                       Container(width: double.infinity, padding: const EdgeInsets.all(8), color: Colors.grey.shade200, child: Text(nomeDia, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
-                                      ...eventos.map((ev) {
+                                      ...eventos.asMap().entries.map((entry) {
+                                          int index = entry.key;
+                                          var ev = entry.value;
+
                                           String planoIdEv = ev['nomePlano'].toString().replaceAll('PLANO ', '').replaceAll('MODO ', '');
                                           Color corEvento = _obterCorDoPlano(planoIdEv);
-                                          return Container(
-                                            margin: const EdgeInsets.all(4), padding: const EdgeInsets.all(6),
-                                            decoration: BoxDecoration(color: corEvento.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4), border: Border.all(color: corEvento.withValues(alpha: 0.5))),
-                                            child: Column(children: [Text(ev['hora'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF2f3b4c))), const SizedBox(height: 2), Text(ev['nomePlano'], style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: corEvento), textAlign: TextAlign.center)]),
+                                          
+                                          String nomeExibicao = ev['nomePlano'].toString();
+                                          if (nomeExibicao == 'MODO PISCANTE') nomeExibicao = 'MODO\nPISCANTE';
+                                          if (nomeExibicao == 'MODO APAGADO') nomeExibicao = 'MODO\nAPAGADO';
+
+                                          return InkWell(
+                                            onTap: () {
+                                              if (_modoEdicao) {
+                                                _editarAgendamentoExistente(dia, index, ev);
+                                              }
+                                            },
+                                            child: Container(
+                                              margin: const EdgeInsets.all(4), padding: const EdgeInsets.all(6),
+                                              decoration: BoxDecoration(color: corEvento.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4), border: Border.all(color: corEvento.withValues(alpha: 0.5))),
+                                              child: Column(children: [Text(ev['hora'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF2f3b4c))), const SizedBox(height: 2), Text(nomeExibicao, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: corEvento), textAlign: TextAlign.center)]),
+                                            ),
                                           );
                                         }
                                       ),
@@ -1088,6 +1814,25 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                           onUpdate: () => setState(() {}),
                         );
                       }), 
+                    ],
+
+                    // --- OBSERVAÇÕES DO PROJETO ---
+                    if (_observacoes.isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      _buildSectionTitle('OBSERVAÇÕES DO PROJETO'),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: const BorderRadius.vertical(bottom: Radius.circular(6)),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Text(
+                          _observacoes,
+                          style: const TextStyle(fontSize: 14, color: Colors.black87, height: 1.5),
+                        ),
+                      ),
                     ],
                   ],
                 ),
