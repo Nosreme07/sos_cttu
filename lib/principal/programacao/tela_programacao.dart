@@ -41,7 +41,7 @@ class PiscantePainter extends CustomPainter {
 }
 
 // ==========================================
-// PAINTER: RÉGUA DO GRÁFICO DE GANTT (1 em 1, 5 em 5, 10 em 10)
+// PAINTER: RÉGUA DO GRÁFICO DE GANTT
 // ==========================================
 class RulerPainter extends CustomPainter {
   final int tc;
@@ -56,7 +56,6 @@ class RulerPainter extends CustomPainter {
 
     final textStyle = const TextStyle(color: Colors.black87, fontSize: 9, fontWeight: FontWeight.bold);
     
-    // Linha base contínua
     canvas.drawLine(Offset(0, size.height), Offset(size.width, size.height), paintBase);
     
     if (tc <= 0) return;
@@ -65,23 +64,19 @@ class RulerPainter extends CustomPainter {
       double x = (i / tc) * size.width;
 
       if (i % 10 == 0) {
-        // Traço de 10 em 10 (Maior + Texto)
         canvas.drawLine(Offset(x, size.height - 8), Offset(x, size.height), paintTracoMaior);
         final textSpan = TextSpan(text: '$i', style: textStyle);
         final textPainter = TextPainter(text: textSpan, textDirection: ui.TextDirection.ltr);
         textPainter.layout();
         
-        // Impede que o último número "estoure" a margem da caixa
         double dx = x - (textPainter.width / 2);
         if (i == tc) dx = x - textPainter.width - 6; 
         if (i == 0) dx = 0;
 
         textPainter.paint(canvas, Offset(dx, 0));
       } else if (i % 5 == 0) {
-        // Traço de 5 em 5 (Mediano)
         canvas.drawLine(Offset(x, size.height - 5), Offset(x, size.height), paintTracoMedio);
       } else {
-        // Traço de 1 em 1 (Menor)
         canvas.drawLine(Offset(x, size.height - 3), Offset(x, size.height), paintTracoMenor);
       }
     }
@@ -280,21 +275,10 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
     }
   }
 
-  Color _obterCorDoPlanoLocal(String planId) {
-    String idFormatado = planId.toUpperCase().trim();
-    if (idFormatado == 'PISCANTE') return Colors.amber.shade700;
-    if (idFormatado == 'APAGADO') return Colors.grey.shade800;
-
-    int idNum = int.tryParse(idFormatado.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
-    List<Color> paleta = [Colors.blue, Colors.purple, Colors.teal, Colors.indigo, Colors.pink, Colors.cyan, Colors.deepOrange, Colors.lightGreen, Colors.deepPurple, Colors.brown];
-    return paleta[idNum % paleta.length];
-  }
-
   @override
   Widget build(BuildContext context) {
     String tipoStr = widget.plano['type']?.toString() ?? 'normal';
     String planIdStr = widget.plano['planId']?.toString().toUpperCase() ?? '??';
-    Color corPlano = _obterCorDoPlanoLocal(planIdStr);
 
     if (tipoStr == 'special') {
       Color corFundo = (planIdStr == 'PISCANTE') ? Colors.yellow.shade700 : Colors.grey.shade800;
@@ -429,7 +413,6 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
                               int start = int.tryParse(g['startCtrl'].text) ?? 0;
                               int end = int.tryParse(g['endCtrl'].text) ?? 0;
                               int yellow = int.tryParse(g['yellowCtrl'].text) ?? 3;
-                              int allRed = int.tryParse(g['allRedCtrl'].text) ?? 2;
                               
                               int greenDuration = end >= start ? end - start : (tc - start) + end;
                               int yellowDuration = yellow;
@@ -565,7 +548,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
           if (numeros.isNotEmpty) idFormatado = numeros.padLeft(3, '0');
         }
         String endereco = (d['endereco'] ?? '').toString();
-        // CORREÇÃO: Buscando a chave correta 'subareas' conforme imagem do banco
         String subDb = (d['subareas'] ?? d['subarea'] ?? '').toString();
 
         if (idFormatado != '000' && endereco.isNotEmpty) {
@@ -596,6 +578,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
           _grupos = data['grupos'] ?? [];
           _planos = data['planos'] ?? [];
           _agendamento = data['agendamento'] ?? {};
+          _subarea = data['subarea'] ?? "---";
           _observacoes = data['observacoes'] ?? "";
           _ordenarPlanos();
         });
@@ -678,7 +661,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
   }
 
   // ==========================================
-  // FUNÇÃO: EXPORTAR PARA PDF COM GANTT NATIVO E LARGURAS FIXAS (BLINDADO)
+  // FUNÇÃO: EXPORTAR PARA PDF
   // ==========================================
   Future<void> _exportarPdf() async {
     if (_semaforoSelecionado == null) return;
@@ -882,7 +865,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                   String planIdStr = p['planId']?.toString().toUpperCase() ?? '??';
                   
                   if (tipoStr == 'special') {
-                    // WRAP: Impede o card de quebrar pela metade entre as páginas
                     return pw.Wrap(
                       children: [
                         pw.Container(
@@ -899,7 +881,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                   int tc = p['tc'] ?? 100;
                   List groups = p['groups'] ?? [];
 
-                  // WRAP: Impede o card de quebrar pela metade entre as páginas
                   return pw.Wrap(
                     children: [
                       pw.Container(
@@ -920,19 +901,19 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                               crossAxisAlignment: pw.CrossAxisAlignment.start,
                               children: [
                                 pw.Container(
-                                  width: 235, // Largura Expandida para evitar quebra de linha
+                                  width: 235,
                                   padding: const pw.EdgeInsets.all(4),
                                   child: groups.isNotEmpty 
                                     ? pw.TableHelper.fromTextArray(
                                         cellPadding: const pw.EdgeInsets.all(2), 
                                         columnWidths: {
-                                          0: const pw.FlexColumnWidth(1.2), // Grupo
-                                          1: const pw.FlexColumnWidth(1.0), // Início
-                                          2: const pw.FlexColumnWidth(1.0), // Fim
-                                          3: const pw.FlexColumnWidth(1.2), // Verde
-                                          4: const pw.FlexColumnWidth(1.6), // Amarelo
-                                          5: const pw.FlexColumnWidth(1.8), // Vm.Geral
-                                          6: const pw.FlexColumnWidth(2.0), // Entreverde
+                                          0: const pw.FlexColumnWidth(1.2),
+                                          1: const pw.FlexColumnWidth(1.0),
+                                          2: const pw.FlexColumnWidth(1.0),
+                                          3: const pw.FlexColumnWidth(1.2),
+                                          4: const pw.FlexColumnWidth(1.6),
+                                          5: const pw.FlexColumnWidth(1.8),
+                                          6: const pw.FlexColumnWidth(2.0),
                                         },
                                         headers: ['Grupo', 'Início', 'Fim', 'Verde', 'Amarelo', 'Vm.Geral', 'Entreverde'],
                                         data: groups.map((g) {
@@ -1110,7 +1091,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                       int? qtd = int.tryParse(qtdController.text.trim());
                       if (qtd == null || qtd <= 0 || qtd > 10) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Quantidade inválida (1 a 10).'), backgroundColor: Colors.red)); return; }
                       
-                      // Mantém os nomes se o cara só mudou a quantidade
                       List<TextEditingController> novosControllers = [];
                       for (int i = 0; i < qtd; i++) {
                         if (i < nomesControllers.length) {
@@ -1126,6 +1106,16 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                   ),
                 ] else if (passoAtual == 2) ...[
                   TextButton(onPressed: salvando ? null : () { setModalState(() { passoAtual = 1; }); }, child: const Text('Voltar', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold))),
+                  TextButton(
+                    onPressed: salvando ? null : () {
+                      setModalState(() {
+                        quantidadeGrupos++;
+                        nomesControllers.add(TextEditingController());
+                        qtdController.text = quantidadeGrupos.toString();
+                      });
+                    },
+                    child: const Text('+ Novo Grupo', style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
+                  ),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
                     onPressed: salvando ? null : () async {
@@ -1137,7 +1127,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                       }
                       if (!camposValidos) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preencha todos os grupos.'), backgroundColor: Colors.red)); return; }
 
-                      // ATUALIZAÇÃO SEGURA: Mescla grupos novos/editados com planos já existentes
                       List<Map<String, dynamic>> planosAtualizados = [];
                       if (_planos.isNotEmpty) {
                          for (var p in _planos) {
@@ -1175,7 +1164,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                             }
                          }
                       } else {
-                        // Se for a primeira vez, cria os nativos do zero
                         planosAtualizados = [
                           {
                             'planId': '01', 'type': 'normal', 'tc': 100, 'offset': 0,
@@ -1574,14 +1562,21 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                                                         if (nomeExibicao == 'MODO PISCANTE') nomeExibicao = 'MODO\nPISCANTE';
                                                         if (nomeExibicao == 'MODO APAGADO') nomeExibicao = 'MODO\nAPAGADO';
 
-                                                        return Container(
-                                                          margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(8),
-                                                          decoration: BoxDecoration(color: corEvento.withValues(alpha: 0.1), border: Border.all(color: corEvento.withValues(alpha: 0.5)), borderRadius: BorderRadius.circular(6)),
-                                                          child: Column(
-                                                            children: [
-                                                              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(ev['hora'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87)), InkWell(onTap: () { setModalState(() { agendamentoTemp[diaChave]!.removeAt(index); }); }, child: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent))]),
-                                                              const SizedBox(height: 4), Text(nomeExibicao, textAlign: TextAlign.center, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: corEvento)),
-                                                            ],
+                                                        return InkWell(
+                                                          onTap: () {
+                                                            if (_modoEdicao) {
+                                                              _editarAgendamentoExistente(diaChave, index, ev);
+                                                            }
+                                                          },
+                                                          child: Container(
+                                                            margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(8),
+                                                            decoration: BoxDecoration(color: corEvento.withValues(alpha: 0.1), border: Border.all(color: corEvento.withValues(alpha: 0.5)), borderRadius: BorderRadius.circular(6)),
+                                                            child: Column(
+                                                              children: [
+                                                                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(ev['hora'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87)), InkWell(onTap: () { setModalState(() { agendamentoTemp[diaChave]!.removeAt(index); }); }, child: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent))]),
+                                                                const SizedBox(height: 4), Text(nomeExibicao, textAlign: TextAlign.center, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: corEvento)),
+                                                              ],
+                                                            ),
                                                           ),
                                                         );
                                                       }

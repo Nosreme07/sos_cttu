@@ -54,6 +54,7 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
   List<String> _opcoesSemaforos = [];
   List<String> _opcoesFalhas = [];
   List<String> _opcoesOrigens = [];
+  List<String> _opcoesMateriais = []; // Nova lista de materiais
 
   Timer? _debounce;
   final ImagePicker _picker = ImagePicker();
@@ -138,6 +139,7 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
       final s = await FirebaseFirestore.instance.collection('semaforos').get();
       final f = await FirebaseFirestore.instance.collection('falhas').get();
       final o = await FirebaseFirestore.instance.collection('origens').get();
+      final m = await FirebaseFirestore.instance.collection('materiais').get(); // Busca os materiais
 
       List<Map<String, dynamic>> semaforosLocal = s.docs.map<Map<String, dynamic>>((doc) {
         var d = doc.data();
@@ -166,6 +168,12 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
       }).where((origem) => origem.isNotEmpty).toList();
       origensLocal.sort();
 
+      List<String> materiaisLocal = m.docs.map((doc) {
+        var d = doc.data();
+        return (d['nome'] ?? d['descricao'] ?? d['material'] ?? '').toString().toUpperCase();
+      }).where((mat) => mat.isNotEmpty).toList();
+      materiaisLocal.sort();
+
       setState(() {
         _semaforosAux = semaforosLocal;
         _falhasAux = falhasLocal;
@@ -174,6 +182,7 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
         _opcoesSemaforos = semaforosLocal.map((sem) => "${sem['id']} - ${sem['endereco']}").toSet().toList();
         _opcoesFalhas = falhasLocal.map((fal) => fal['falha'] as String).toSet().toList();
         _opcoesOrigens = origensLocal.toSet().toList();
+        _opcoesMateriais = materiaisLocal.toSet().toList(); // Alimenta a lista de materiais
       });
     } catch (e) {
       debugPrint("Erro ao carregar auxiliares: $e");
@@ -306,7 +315,7 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                 const Divider(),
                 const SizedBox(height: 10),
                 DropdownMenu<String>(
-                  expandedInsets: EdgeInsets.zero, // Preenche a largura sem precisar de LayoutBuilder
+                  expandedInsets: EdgeInsets.zero, 
                   controller: semaforoMenuCtrl,
                   enableFilter: true, enableSearch: true,
                   label: const Text('Semáforo *'),
@@ -451,6 +460,12 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
     String falha = dados['tipo_da_falha'] ?? '';
     final descricaoCtrl = TextEditingController();
     final acaoCtrl = TextEditingController();
+    
+    // Controles para os materiais
+    List<Map<String, dynamic>> materiaisUsados = [];
+    final materialCtrl = TextEditingController();
+    final qtdCtrl = TextEditingController();
+
     List<Uint8List> fotosSelecionadas = [];
 
     if (falha.isNotEmpty && !_opcoesFalhas.contains(falha)) {
@@ -487,6 +502,7 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                       defeitoConstatado = v;
                       if (!defeitoConstatado) {
                         acaoCtrl.text = 'A EQUIPE RELATA QUE REALIZOU UMA VISTORIA COMPLETA E O SEMÁFORO NÃO APRESENTOU DEFEITO.';
+                        materiaisUsados.clear(); // Limpa materiais caso desmarque a opção
                       } else {
                         acaoCtrl.clear();
                       }
@@ -521,6 +537,81 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                   decoration: const InputDecoration(labelText: 'Ação Técnica da Equipe *', border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 16),
+
+                // --- INÍCIO: MATERIAIS UTILIZADOS ---
+                if (defeitoConstatado) ...[
+                  const Text('MATERIAIS UTILIZADOS (Opcional)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: DropdownMenu<String>(
+                          expandedInsets: EdgeInsets.zero,
+                          controller: materialCtrl,
+                          enableFilter: true, enableSearch: true,
+                          label: const Text('Buscar Material'),
+                          inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
+                          dropdownMenuEntries: _opcoesMateriais.map((m) => DropdownMenuEntry(value: m, label: m)).toList(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 1,
+                        child: TextFormField(
+                          controller: qtdCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: 'Qtd', border: OutlineInputBorder(), isDense: true),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, padding: const EdgeInsets.symmetric(vertical: 16)),
+                        onPressed: () {
+                          if (materialCtrl.text.isNotEmpty && qtdCtrl.text.isNotEmpty) {
+                            setStateModal(() {
+                              materiaisUsados.add({
+                                'material': materialCtrl.text.toUpperCase(),
+                                'quantidade': qtdCtrl.text
+                              });
+                              materialCtrl.clear();
+                              qtdCtrl.clear();
+                            });
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione um material e informe a quantidade.')));
+                          }
+                        },
+                        child: const Icon(Icons.add, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                  if (materiaisUsados.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+                      child: Column(
+                        children: materiaisUsados.asMap().entries.map((e) {
+                          int idx = e.key;
+                          Map mat = e.value;
+                          return Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(child: Text('${mat['quantidade']}x - ${mat['material']}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                              InkWell(
+                                onTap: () => setStateModal(() => materiaisUsados.removeAt(idx)),
+                                child: const Icon(Icons.delete, color: Colors.red, size: 20),
+                              )
+                            ],
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                ],
+                // --- FIM: MATERIAIS UTILIZADOS ---
 
                 const Text('Fotos do Serviço (Max: 4)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
                 const SizedBox(height: 8),
@@ -676,6 +767,7 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                               'falha_aparente_final': defeitoConstatado ? falhaMenuCtrl.text : 'DEFEITO NÃO CONSTATADO',
                               'descricao_encontro': defeitoConstatado ? descricaoCtrl.text.toUpperCase() : 'DEFEITO NÃO CONSTATADO',
                               'acao_equipe': acaoCtrl.text.toUpperCase(),
+                              'materiais_utilizados': materiaisUsados, // Salva a lista de materiais no banco
                               'fotos_finalizacao': fotosBase64,
                               'usuario_finalizacao': nomeUsuario, 
                             });
@@ -847,7 +939,6 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                 _infoRow('Abertura:', _formatarDataHoraCompleta(dados['data_de_abertura'])),
                 _infoRow('Atendimento:', _formatarDataHoraCompleta(dados['data_atendimento'])),
                 
-                // Customização do campo "Ocorrência venceu" com o ícone do relógio dinâmico
                 Padding(
                   padding: const EdgeInsets.only(bottom: 6),
                   child: Row(
@@ -890,6 +981,27 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                 _infoRow('Falha Relatada:', dados['tipo_da_falha'] ?? '---'),
                 _infoRow('Falha Encontrada:', dados['falha_aparente_final'] ?? '---'),
                 _infoRow('Ação Técnica:', dados['acao_equipe'] ?? '---'),
+                
+                // Exibição dos Materiais Utilizados no Modal de Visualização
+                if (dados['materiais_utilizados'] != null && (dados['materiais_utilizados'] as List).isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  const Text('MATERIAIS UTILIZADOS', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: (dados['materiais_utilizados'] as List).map((mat) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Text('${mat['quantidade']}x - ${mat['material']}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ],
+                
                 const SizedBox(height: 15),
 
                 if (dados['fotos_finalizacao'] != null && (dados['fotos_finalizacao'] as List).isNotEmpty) ...[
@@ -1027,6 +1139,15 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
           pw.Text('Falha Relatada: ${dados['tipo_da_falha'] ?? '---'}'),
           pw.Text('Falha encontrada: ${dados['falha_aparente_final'] ?? '---'}'),
           pw.Text('Ação técnica: ${dados['acao_equipe'] ?? '---'}'),
+          
+          // Exibição dos Materiais Utilizados no Relatório PDF
+          if (dados['materiais_utilizados'] != null && (dados['materiais_utilizados'] as List).isNotEmpty) ...[
+            pw.SizedBox(height: 10),
+            pw.Text('MATERIAIS UTILIZADOS', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey)),
+            pw.SizedBox(height: 4),
+            ...(dados['materiais_utilizados'] as List).map((mat) => pw.Text('${mat['quantidade']}x - ${mat['material']}', style: const pw.TextStyle(fontSize: 11))),
+          ],
+
           pw.SizedBox(height: 20),
 
           if (imagensPdf.isNotEmpty) ...[

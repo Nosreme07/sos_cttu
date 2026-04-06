@@ -4,7 +4,8 @@ Consertar os tempos dos planos
 
 
 
-
+ADICIONAR CAMPOS DE MATERIAIS
+ADICIONAR PAG DE CADASTRO MATERIAIS
 COLOCAR NOS RELATORIOS OS MATERIAIS UTILIZADOS
 
 
@@ -13,3 +14,9 @@ COLOCAR NOS RELATORIOS OS MATERIAIS UTILIZADOS
 
 
 observar nos relatorios os que foram finalizados informar a falha encontrada.
+
+
+
+- nas finalizações da ocorrÊncia quero que como encontrou o 
+semáforo seja o mesmo de falhas encontrada.
+
