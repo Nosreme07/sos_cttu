@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
 // Importações para PDF
@@ -94,14 +95,18 @@ class PlanoEditorWidget extends StatefulWidget {
   final List<dynamic> gruposGlobais;
   final bool modoEdicao;
   final VoidCallback onUpdate;
+  final VoidCallback? onDelete;
+  final VoidCallback? onEdit;
 
   const PlanoEditorWidget({
-    Key? key,
+    super.key,
     required this.plano,
     required this.gruposGlobais,
     required this.modoEdicao,
     required this.onUpdate,
-  }) : super(key: key);
+    this.onDelete,
+    this.onEdit,
+  });
 
   @override
   State<PlanoEditorWidget> createState() => _PlanoEditorWidgetState();
@@ -228,7 +233,6 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
     );
   }
 
-  // --- MOTOR INTELIGENTE DE SEGMENTOS ---
   List<Widget> _drawSegment(double start, double duration, double tc, double width, double height, Color color, bool isRed, {String? text}) {
     if (tc <= 0 || duration <= 0) return [];
     start = start % tc;
@@ -275,10 +279,21 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
     }
   }
 
+  Color _obterCorDoPlanoLocal(String planId) {
+    String idFormatado = planId.toUpperCase().trim();
+    if (idFormatado == 'PISCANTE') return Colors.amber.shade700;
+    if (idFormatado == 'APAGADO') return Colors.grey.shade800;
+
+    int idNum = int.tryParse(idFormatado.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+    List<Color> paleta = [Colors.blue, Colors.purple, Colors.teal, Colors.indigo, Colors.pink, Colors.cyan, Colors.deepOrange, Colors.lightGreen, Colors.deepPurple, Colors.brown];
+    return paleta[idNum % paleta.length];
+  }
+
   @override
   Widget build(BuildContext context) {
     String tipoStr = widget.plano['type']?.toString() ?? 'normal';
     String planIdStr = widget.plano['planId']?.toString().toUpperCase() ?? '??';
+    Color corPlano = _obterCorDoPlanoLocal(planIdStr);
 
     if (tipoStr == 'special') {
       Color corFundo = (planIdStr == 'PISCANTE') ? Colors.yellow.shade700 : Colors.grey.shade800;
@@ -293,7 +308,17 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               color: const Color(0xFF2f3b4c), 
-              child: Text('MODO $planIdStr', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14)),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('MODO $planIdStr', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14)),
+                  if (widget.modoEdicao && widget.onDelete != null)
+                    InkWell(
+                      onTap: widget.onDelete,
+                      child: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
+                    )
+                ],
+              ),
             ),
             ClipRRect(
               borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
@@ -322,8 +347,30 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            color: const Color(0xFF2f3b4c), 
-            child: Text('PLANO $planIdStr   |   Ciclo: ${tc}s', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14)),
+            decoration: BoxDecoration(
+              color: const Color(0xFF2f3b4c),
+              border: Border(left: BorderSide(color: corPlano, width: 4)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('PLANO $planIdStr   |   Ciclo: ${tc}s', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14)),
+                if (widget.modoEdicao && widget.onEdit != null && widget.onDelete != null)
+                  Row(
+                    children: [
+                      InkWell(
+                        onTap: widget.onEdit,
+                        child: const Icon(Icons.edit, color: Colors.white70, size: 20),
+                      ),
+                      const SizedBox(width: 16),
+                      InkWell(
+                        onTap: widget.onDelete,
+                        child: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
+                      ),
+                    ],
+                  )
+              ],
+            ),
           ),
           
           Container(
@@ -475,10 +522,9 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
   String _subarea = "---";
   List<String> _listaSubareas = [];
   
-  // ignore: unused_field
-  String _ultimaAtualizacao = "";
-  // ignore: unused_field
-  String _motivoEdicao = "";
+  // Auditoria
+  String _ultimaAtualizacaoFormatada = "";
+  
   String _observacoes = "";
 
   List<dynamic> _grupos = [];
@@ -573,6 +619,14 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
       DocumentSnapshot doc = await FirebaseFirestore.instance.collection('programacao').doc(semaforoDocId).get();
       if (doc.exists && doc.data() != null) {
         var data = doc.data() as Map<String, dynamic>;
+        
+        String ultAuditoria = "";
+        if (data['ultima_atualizacao'] != null && data['motivo_edicao'] != null && data['usuario_edicao'] != null) {
+          DateTime dt = (data['ultima_atualizacao'] as Timestamp).toDate();
+          String dataFormatada = DateFormat('dd/MM/yyyy - HH:mm').format(dt);
+          ultAuditoria = "$dataFormatada\nMotivo: ${data['motivo_edicao']}\nPor: ${data['usuario_edicao']}";
+        }
+
         setState(() {
           _existeProgramacao = true;
           _grupos = data['grupos'] ?? [];
@@ -580,6 +634,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
           _agendamento = data['agendamento'] ?? {};
           _subarea = data['subarea'] ?? "---";
           _observacoes = data['observacoes'] ?? "";
+          _ultimaAtualizacaoFormatada = ultAuditoria;
           _ordenarPlanos();
         });
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Programação carregada!'), backgroundColor: Colors.green, duration: Duration(seconds: 1)));
@@ -595,6 +650,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     setState(() {
       _existeProgramacao = true;
       _subarea = "ZONA SUL";
+      _ultimaAtualizacaoFormatada = "01/01/2026 - 12:00\nMotivo: CRIAÇÃO INICIAL\nPor: SISTEMA SOS";
       _grupos = [{'id': 'G1', 'nome': 'AV. PRINCIPAL'}, {'id': 'G2', 'nome': 'RUA LATERAL'}];
       _planos = [
         {
@@ -616,7 +672,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
   void _limparTela() {
     setState(() {
       _existeProgramacao = false; _modoEdicao = false; 
-      _ultimaAtualizacao = ""; _motivoEdicao = ""; _observacoes = "";
+      _ultimaAtualizacaoFormatada = ""; _observacoes = "";
       _grupos = []; _planos = []; _agendamento = {};
     });
   }
@@ -626,7 +682,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
   }
 
   // ==========================================
-  // FUNÇÃO: ZERAR TUDO
+  // FUNÇÃO: ZERAR TUDO E FUNÇÕES INDIVIDUAIS
   // ==========================================
   void _zerarTudo() {
     showDialog(
@@ -647,6 +703,53 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Programação zerada com sucesso!'), backgroundColor: Colors.orange));
             },
             child: const Text('Sim, Zerar Tudo', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          )
+        ]
+      )
+    );
+  }
+
+  void _excluirPlano(int index) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir Plano', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+        content: const Text('Deseja realmente remover este plano da configuração?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar', style: TextStyle(color: Colors.black87))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              setState(() { _planos.removeAt(index); });
+              Navigator.pop(ctx);
+            },
+            child: const Text('Excluir'),
+          )
+        ]
+      )
+    );
+  }
+
+  void _abrirModalRenomearPlano(Map<String, dynamic> plano, int index) {
+    TextEditingController idCtrl = TextEditingController(text: plano['planId'].toString());
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Editar Identificação', style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: idCtrl,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(labelText: 'Nome/Número do Plano', border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar', style: TextStyle(color: Colors.black87))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
+            onPressed: () {
+              setState(() { plano['planId'] = idCtrl.text.toUpperCase(); });
+              Navigator.pop(ctx);
+            },
+            child: const Text('Salvar', style: TextStyle(color: Colors.white)),
           )
         ]
       )
@@ -682,7 +785,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
       )['label']!;
 
       pw.Widget buildPdfGantt(List groups, int tc) {
-        double ganttWidth = 280.0; 
+        double ganttWidth = 360.0; // Expandido para ocupar o espaço das colunas removidas
         double rowHeight = 18.0; 
         double rulerHeight = 15.0;
 
@@ -708,14 +811,13 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
           }
         }
 
-        double currentY = rulerHeight + 5;
+        double currentY = rulerHeight + 5; // Inicia em 20
 
         for (var g in groups) {
            int start = int.tryParse(g['start']?.toString() ?? '0') ?? 0;
            int end = int.tryParse(g['end']?.toString() ?? '0') ?? 0;
            int yellow = int.tryParse(g['yellow']?.toString() ?? '3') ?? 3;
-           int allRed = int.tryParse(g['allRed']?.toString() ?? '2') ?? 2;
-
+           
            int greenDuration = end >= start ? end - start : (tc - start) + end;
            int yellowDuration = yellow;
            int redDuration = tc - greenDuration - yellowDuration;
@@ -733,7 +835,8 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
               if (s + dur <= tc) {
                  stackChildren.add(
                    pw.Positioned(
-                     left: (s / tc) * ganttWidth, top: currentY,
+                     left: (s / tc) * ganttWidth, 
+                     top: currentY + 3, // Centraliza a barra perfeitamente com a altura da linha da tabela (18px)
                      child: pw.Container(width: (dur / tc) * ganttWidth, height: 12, color: color, alignment: pw.Alignment.center, child: txt != null ? pw.Text(txt, style: pw.TextStyle(color: PdfColors.white, fontSize: 6, fontWeight: pw.FontWeight.bold)) : null)
                    )
                  );
@@ -742,13 +845,14 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                  double d2 = dur - d1;
                  stackChildren.add(
                    pw.Positioned(
-                     left: (s / tc) * ganttWidth, top: currentY,
+                     left: (s / tc) * ganttWidth, 
+                     top: currentY + 3,
                      child: pw.Container(width: (d1 / tc) * ganttWidth, height: 12, color: color, alignment: pw.Alignment.center, child: txt != null ? pw.Text(txt, style: pw.TextStyle(color: PdfColors.white, fontSize: 6, fontWeight: pw.FontWeight.bold)) : null)
                    )
                  );
                  stackChildren.add(
                    pw.Positioned(
-                     left: 0, top: currentY,
+                     left: 0, top: currentY + 3,
                      child: pw.Container(width: (d2 / tc) * ganttWidth, height: 12, color: color)
                    )
                  );
@@ -803,6 +907,13 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
             return [
               pw.Text('Semáforo: $semaforoLabel', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
               pw.Text('Subárea: $_subarea', style: const pw.TextStyle(fontSize: 12)),
+              if (_ultimaAtualizacaoFormatada.isNotEmpty)
+                pw.Container(
+                  margin: const pw.EdgeInsets.only(top: 5),
+                  padding: const pw.EdgeInsets.all(4),
+                  decoration: pw.BoxDecoration(color: PdfColors.grey200, border: pw.Border.all(color: PdfColors.grey400)),
+                  child: pw.Text('Última Edição:\n${_ultimaAtualizacaoFormatada.replaceAll('\n', '   |   ')}', style: const pw.TextStyle(fontSize: 9, color: PdfColors.blueGrey)),
+                ),
               pw.SizedBox(height: 15),
 
               if (_grupos.isNotEmpty) ...[
@@ -901,39 +1012,50 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                               crossAxisAlignment: pw.CrossAxisAlignment.start,
                               children: [
                                 pw.Container(
-                                  width: 235,
-                                  padding: const pw.EdgeInsets.all(4),
+                                  width: 160, // Tabela menor e focada apenas nos tempos
+                                  padding: const pw.EdgeInsets.only(top: 4, bottom: 4, left: 4),
                                   child: groups.isNotEmpty 
-                                    ? pw.TableHelper.fromTextArray(
-                                        cellPadding: const pw.EdgeInsets.all(2), 
+                                    ? pw.Table(
+                                        border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
                                         columnWidths: {
-                                          0: const pw.FlexColumnWidth(1.2),
-                                          1: const pw.FlexColumnWidth(1.0),
-                                          2: const pw.FlexColumnWidth(1.0),
-                                          3: const pw.FlexColumnWidth(1.2),
-                                          4: const pw.FlexColumnWidth(1.6),
-                                          5: const pw.FlexColumnWidth(1.8),
-                                          6: const pw.FlexColumnWidth(2.0),
+                                          0: const pw.FixedColumnWidth(40), // Verde
+                                          1: const pw.FixedColumnWidth(40), // Amarelo
+                                          2: const pw.FixedColumnWidth(40), // Vm.Geral
+                                          3: const pw.FixedColumnWidth(40), // Entreverde
                                         },
-                                        headers: ['Grupo', 'Início', 'Fim', 'Verde', 'Amarelo', 'Vm.Geral', 'Entreverde'],
-                                        data: groups.map((g) {
-                                          int start = g['start'] ?? 0;
-                                          int end = g['end'] ?? 0;
-                                          int yellow = g['yellow'] ?? 3;
-                                          int allRed = g['allRed'] ?? 2;
-                                          int verde = end >= start ? end - start : (tc - start) + end;
-                                          int entreverde = yellow + allRed;
-                                          return [g['id'].toString(), start.toString(), end.toString(), verde.toString(), yellow.toString(), allRed.toString(), entreverde.toString()];
-                                        }).toList(),
-                                        headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey800, fontSize: 7),
-                                        headerDecoration: const pw.BoxDecoration(border: pw.Border(bottom: pw.BorderSide(color: PdfColors.grey300))),
-                                        cellStyle: const pw.TextStyle(fontSize: 8, color: PdfColors.grey800),
-                                        cellAlignment: pw.Alignment.center,
+                                        children: [
+                                          pw.TableRow(
+                                            children: ['Verde', 'Amarelo', 'Vm.Geral', 'Entreverde'].map((t) => 
+                                              pw.Container(
+                                                height: 20, // Altura de régua do Gantt
+                                                alignment: pw.Alignment.center, 
+                                                child: pw.Text(t, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey800))
+                                              )
+                                            ).toList()
+                                          ),
+                                          ...groups.map((g) {
+                                            int start = g['start'] ?? 0;
+                                            int end = g['end'] ?? 0;
+                                            int yellow = g['yellow'] ?? 3;
+                                            int allRed = g['allRed'] ?? 2;
+                                            int verde = end >= start ? end - start : (tc - start) + end;
+                                            int entreverde = yellow + allRed;
+
+                                            return pw.TableRow(
+                                              children: [
+                                                pw.Container(height: 18, alignment: pw.Alignment.center, color: PdfColor.fromHex('#e8f5e9'), child: pw.Text('$verde', style: pw.TextStyle(fontSize: 8, color: PdfColors.green800, fontWeight: pw.FontWeight.bold))),
+                                                pw.Container(height: 18, alignment: pw.Alignment.center, color: PdfColor.fromHex('#fffde7'), child: pw.Text('$yellow', style: pw.TextStyle(fontSize: 8, color: PdfColors.orange800, fontWeight: pw.FontWeight.bold))),
+                                                pw.Container(height: 18, alignment: pw.Alignment.center, color: PdfColor.fromHex('#ffebee'), child: pw.Text('$allRed', style: pw.TextStyle(fontSize: 8, color: PdfColors.red800, fontWeight: pw.FontWeight.bold))),
+                                                pw.Container(height: 18, alignment: pw.Alignment.center, child: pw.Text('$entreverde', style: pw.TextStyle(fontSize: 8, color: PdfColors.grey800))),
+                                              ]
+                                            );
+                                          }).toList()
+                                        ]
                                       )
-                                    : pw.Text('Nenhum grupo de verde configurado.', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey))
+                                    : pw.Text('Nenhum grupo configurado.', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey))
                                 ),
                                 pw.Container(
-                                  width: 296, 
+                                  width: 376, // Gráfico expandido ocupando o novo espaço
                                   padding: const pw.EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4),
                                   child: buildPdfGantt(groups, tc)
                                 )
@@ -948,14 +1070,19 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                 pw.SizedBox(height: 20),
               ],
 
+              // QUEBRA DE PÁGINA IMPEDIDA COM pw.Wrap()
               if (_observacoes.isNotEmpty) ...[
-                pw.Text('OBSERVAÇÕES DO PROJETO', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.black)),
-                pw.SizedBox(height: 8),
-                pw.Container(
-                  width: double.infinity,
-                  padding: const pw.EdgeInsets.all(10),
-                  decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey300), borderRadius: pw.BorderRadius.circular(4)),
-                  child: pw.Text(_observacoes, style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey900))
+                pw.Wrap(
+                  children: [
+                    pw.Text('OBSERVAÇÕES DO PROJETO', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.black)),
+                    pw.SizedBox(height: 8),
+                    pw.Container(
+                      width: double.infinity,
+                      padding: const pw.EdgeInsets.all(10),
+                      decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey300), borderRadius: pw.BorderRadius.circular(4)),
+                      child: pw.Text(_observacoes, style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey900))
+                    )
+                  ]
                 )
               ]
             ];
@@ -1564,7 +1691,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
 
                                                         return InkWell(
                                                           onTap: () {
-                                                            if (_modoEdicao) {
+                                                            if (_modoEdicao) { 
                                                               _editarAgendamentoExistente(diaChave, index, ev);
                                                             }
                                                           },
@@ -1647,15 +1774,80 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
   }
 
   // ==========================================
-  // SALVAMENTO GLOBAL NO BANCO
+  // SALVAMENTO GLOBAL NO BANCO E AUDITORIA
   // ==========================================
-  Future<void> _salvarProgramacaoCompleta() async {
+  void _iniciarSalvamentoComMotivo() {
     if (_semaforoSelecionado == 'DEMO') {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Modo DEMO não salva no banco de dados!'), backgroundColor: Colors.orange));
       return;
     }
 
+    if (!_existeProgramacao) {
+       _salvarProgramacaoCompleta('CRIAÇÃO INICIAL');
+       return;
+    }
+
+    final motivoCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Motivo da Edição', style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Descreva brevemente o motivo da alteração nesta programação:', style: TextStyle(fontSize: 13)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: motivoCtrl,
+              textCapitalization: TextCapitalization.characters,
+              maxLines: 3,
+              decoration: const InputDecoration(border: OutlineInputBorder(), hintText: 'Ex: AJUSTE DE TEMPO DE VERDE, NOVA FASE...'),
+            )
+          ]
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar', style: TextStyle(color: Colors.black87))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
+            onPressed: () {
+              if (motivoCtrl.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor, informe o motivo da edição!'), backgroundColor: Colors.red));
+                return;
+              }
+              Navigator.pop(ctx);
+              _salvarProgramacaoCompleta(motivoCtrl.text.trim().toUpperCase());
+            },
+            child: const Text('Confirmar e Salvar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          )
+        ]
+      )
+    );
+  }
+
+  Future<String> _getNomeUsuarioLogado() async {
+    User? user = FirebaseAuth.instance.currentUser;
+    if (user == null) return 'SISTEMA';
     try {
+      DocumentSnapshot doc = await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
+      if (doc.exists && doc.data() != null) {
+        var d = doc.data() as Map<String, dynamic>;
+        if (d['nomeCompleto'] != null && d['nomeCompleto'].toString().isNotEmpty) {
+          return d['nomeCompleto'].toString().toUpperCase();
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao buscar nome: $e');
+    }
+    return (user.displayName ?? user.email ?? 'SISTEMA').toUpperCase();
+  }
+
+  Future<void> _salvarProgramacaoCompleta(String motivo) async {
+    try {
+      String nomeUser = await _getNomeUsuarioLogado();
+
       await FirebaseFirestore.instance.collection('programacao').doc(_semaforoSelecionado).set({
         'semaforo_id': _semaforoSelecionado,
         'grupos': _grupos,
@@ -1663,11 +1855,17 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
         'agendamento': _agendamento,
         'observacoes': _observacoes,
         'ultima_atualizacao': FieldValue.serverTimestamp(),
-        'subarea': _subarea 
+        'subarea': _subarea,
+        'motivo_edicao': motivo,
+        'usuario_edicao': nomeUser,
       }, SetOptions(merge: true));
 
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Toda a programação foi salva com sucesso!'), backgroundColor: Colors.green));
-      setState(() { _modoEdicao = false; });
+      
+      setState(() { 
+        _modoEdicao = false; 
+        _ultimaAtualizacaoFormatada = "${DateFormat('dd/MM/yyyy - HH:mm').format(DateTime.now())}\nMotivo: $motivo\nPor: $nomeUser";
+      });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao salvar no banco: $e'), backgroundColor: Colors.red));
     }
@@ -1810,6 +2008,24 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                                   ] 
                                 )
                               ),
+                              Expanded(
+                                flex: 1, 
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start, 
+                                  children: [
+                                    const Text('Última Edição', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blueGrey)), 
+                                    const SizedBox(height: 4), 
+                                    if (_ultimaAtualizacaoFormatada.isEmpty)
+                                      const Text('Nenhum registro', style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey))
+                                    else
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(color: Colors.blueGrey.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.blueGrey.shade200)),
+                                        child: Text(_ultimaAtualizacaoFormatada, style: const TextStyle(fontSize: 11, color: Colors.black87)),
+                                      )
+                                  ] 
+                                )
+                              ),
                             ],
                           ),
 
@@ -1823,7 +2039,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                                   _buildCustomButton('📝 DEFINIR PLANO', Colors.green, _abrirModalDefinirPlano),
                                   _buildCustomButton('📅 DEFINIR AGENDAMENTO', Colors.blue, _abrirModalAgendamento),
                                   _buildCustomButton('📝 OBSERVAÇÕES', Colors.purple, _abrirModalObservacoes),
-                                  _buildCustomButton('💾 SALVAR PROGRAMAÇÃO', Colors.deepPurple, _salvarProgramacaoCompleta),
+                                  _buildCustomButton('💾 SALVAR PROGRAMAÇÃO', Colors.deepPurple, _iniciarSalvamentoComMotivo),
                                 ],
                                 if (_existeProgramacao && !_modoEdicao) ...[
                                   _buildCustomButton('✏️ EDITAR PROGRAMAÇÃO', Colors.blueGrey, _alternarModoEdicao),
@@ -1900,12 +2116,16 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                     if (_planos.isNotEmpty) ...[
                       _buildSectionTitle('TEMPOS DOS PLANOS'),
                       
-                      ..._planos.map((p) {
+                      ..._planos.asMap().entries.map((entry) {
+                        int index = entry.key;
+                        var p = entry.value;
                         return PlanoEditorWidget(
                           plano: p,
                           gruposGlobais: _grupos,
                           modoEdicao: _modoEdicao,
                           onUpdate: () => setState(() {}),
+                          onDelete: () => _excluirPlano(index),
+                          onEdit: () => _abrirModalRenomearPlano(p, index),
                         );
                       }), 
                     ],

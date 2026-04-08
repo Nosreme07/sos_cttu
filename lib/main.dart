@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:sos_cttu/login/tela_login.dart';
 import 'firebase_options.dart';
 
 // Importação da Tela Principal que inicia o sistema
@@ -36,7 +37,7 @@ class SosApp extends StatelessWidget {
         ),
       ),
       // Aponta para a tela inicial do sistema
-      home: const TelaPrincipal(), 
+      home: const TelaLogin(), 
     );
   }
 }
