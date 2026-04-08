@@ -314,16 +314,71 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                 ),
                 const Divider(),
                 const SizedBox(height: 10),
-                DropdownMenu<String>(
-                  expandedInsets: EdgeInsets.zero, 
-                  controller: semaforoMenuCtrl,
-                  enableFilter: true, enableSearch: true,
-                  label: const Text('Semáforo *'),
-                  inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
-                  initialSelection: semaforoDropdownValue.isEmpty ? null : semaforoDropdownValue,
-                  dropdownMenuEntries: _opcoesSemaforos.map((s) => DropdownMenuEntry(value: s, label: s)).toList(),
-                  onSelected: (val) => semaforoSel = val ?? '',
+                
+                // AUTOCOMPLETE DO SEMÁFORO
+                Autocomplete<String>(
+                  initialValue: TextEditingValue(text: semaforoDropdownValue),
+                  optionsBuilder: (TextEditingValue textEditingValue) {
+                    if (textEditingValue.text.isEmpty) {
+                      return _opcoesSemaforos;
+                    }
+                    return _opcoesSemaforos.where((String option) {
+                      return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
+                    });
+                  },
+                  onSelected: (String selection) {
+                    semaforoSel = selection;
+                    semaforoMenuCtrl.text = selection;
+                  },
+                  fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+                    textEditingController.addListener(() {
+                      semaforoMenuCtrl.text = textEditingController.text;
+                      semaforoSel = textEditingController.text;
+                    });
+                    
+                    return TextField(
+                      controller: textEditingController,
+                      focusNode: focusNode,
+                      inputFormatters: [UpperCaseTextFormatter()],
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(
+                        labelText: 'Semáforo *',
+                        hintText: 'Pesquisar Semáforo...',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                        suffixIcon: Icon(Icons.search),
+                      ),
+                    );
+                  },
+                  optionsViewBuilder: (context, onSelected, options) {
+                    return Align(
+                      alignment: Alignment.topLeft,
+                      child: Material(
+                        elevation: 4.0,
+                        borderRadius: BorderRadius.circular(4),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxHeight: 200, maxWidth: MediaQuery.of(context).size.width - 48),
+                          child: ListView.builder(
+                            padding: EdgeInsets.zero,
+                            shrinkWrap: true,
+                            itemCount: options.length,
+                            itemBuilder: (BuildContext context, int index) {
+                              final String option = options.elementAt(index);
+                              return InkWell(
+                                onTap: () => onSelected(option),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12.0),
+                                  child: Text(option),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
+                
                 const SizedBox(height: 12),
                 DropdownMenu<String>(
                   expandedInsets: EdgeInsets.zero,
@@ -458,7 +513,6 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
     bool estaArrastandoArea = false;
 
     String falha = dados['tipo_da_falha'] ?? '';
-    final descricaoCtrl = TextEditingController();
     final acaoCtrl = TextEditingController();
     
     // Controles para os materiais
@@ -520,13 +574,6 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                     dropdownMenuEntries: _opcoesFalhas.map((f) => DropdownMenuEntry(value: f, label: f)).toList(),
                   ),
                   const SizedBox(height: 10),
-                  TextFormField(
-                    controller: descricaoCtrl,
-                    maxLines: 2,
-                    textCapitalization: TextCapitalization.characters,
-                    inputFormatters: [UpperCaseTextFormatter()],
-                    decoration: const InputDecoration(labelText: 'Como encontrou o semáforo? *', border: OutlineInputBorder()),
-                  ),
                 ],
                 const SizedBox(height: 10),
                 TextFormField(
@@ -742,8 +789,8 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                   onPressed: estaSalvando
                       ? null
                       : () async {
-                          if (defeitoConstatado && (falhaMenuCtrl.text.isEmpty || descricaoCtrl.text.isEmpty)) {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preencha a falha e descrição!')));
+                          if (defeitoConstatado && falhaMenuCtrl.text.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preencha a falha encontrada!')));
                             return;
                           }
                           if (acaoCtrl.text.isEmpty) {
@@ -765,9 +812,8 @@ class _ListaOcorrenciasState extends State<ListaOcorrencias> {
                               'status': 'Finalizado',
                               'data_de_finalizacao': FieldValue.serverTimestamp(),
                               'falha_aparente_final': defeitoConstatado ? falhaMenuCtrl.text : 'DEFEITO NÃO CONSTATADO',
-                              'descricao_encontro': defeitoConstatado ? descricaoCtrl.text.toUpperCase() : 'DEFEITO NÃO CONSTATADO',
                               'acao_equipe': acaoCtrl.text.toUpperCase(),
-                              'materiais_utilizados': materiaisUsados, // Salva a lista de materiais no banco
+                              'materiais_utilizados': materiaisUsados,
                               'fotos_finalizacao': fotosBase64,
                               'usuario_finalizacao': nomeUsuario, 
                             });

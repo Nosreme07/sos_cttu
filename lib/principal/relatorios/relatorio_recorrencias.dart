@@ -146,8 +146,9 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                   .toUpperCase() !=
               _filtroEmpresa) return false;
       if (_filtroFalha.isNotEmpty &&
-          (d['tipo_da_falha'] ?? '').toString().toUpperCase() != _filtroFalha)
+          (d['tipo_da_falha'] ?? '').toString().toUpperCase() != _filtroFalha) {
         return false;
+      }
 
       if (_dataInicio != null || _dataFim != null) {
         if (d['data_de_abertura'] == null) return false;
@@ -201,10 +202,15 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
     return DateFormat('dd/MM/yyyy HH:mm:ss').format(t.toDate());
   }
 
+  // QUEBRA DE LINHA PARA OS RELATÓRIOS
+  String _formatarDataHoraQuebrada(Timestamp? t) {
+    if (t == null) return '---';
+    return DateFormat('dd/MM/yyyy\nHH:mm:ss').format(t.toDate());
+  }
+
   Color _corStatus(String status) {
     String st = status.toLowerCase();
-    if (st.contains('aberto') || st.contains('pendente'))
-      return Colors.redAccent;
+    if (st.contains('aberto') || st.contains('pendente')) return Colors.redAccent;
     if (st.contains('deslocamento')) return Colors.orange;
     if (st.contains('atendimento')) return Colors.blue;
     if (st.contains('conclu') || st.contains('finaliz')) return Colors.green;
@@ -261,7 +267,6 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  // Usando Expanded para evitar barra amarela no número da ocorrência
                                   Expanded(
                                     child: InkWell(
                                       onTap: () => _abrirDetalhesCompletos(d),
@@ -391,9 +396,21 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                 _buildDetailRow('Falha Relatada', data['tipo_da_falha']),
                 _buildDetailRow('Detalhes/Abertura', data['detalhes']),
                 _buildDetailRow('Falha Encontrada', data['falha_aparente_final']),
-                _buildDetailRow(
-                    'Descrição Equipe', data['descricao_encontro']),
                 _buildDetailRow('Ação Técnica', data['acao_equipe']),
+                
+                // Exibição dos materiais na visualização completa
+                if (data['materiais_utilizados'] != null && (data['materiais_utilizados'] as List).isNotEmpty) ...[
+                  const Divider(),
+                  const Text('Materiais Utilizados:', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2c3e50), fontSize: 13)),
+                  const SizedBox(height: 6),
+                  ...(data['materiais_utilizados'] as List).map((mat) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text('${mat['quantidade']}x - ${mat['material']}', style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                    );
+                  }),
+                ],
+
               ],
             ),
           ),
@@ -561,46 +578,62 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
                 style: const pw.TextStyle(fontSize: 12)),
           ),
           pw.SizedBox(height: 15),
-          pw.TableHelper.fromTextArray(
-            headers: [
-              'Nº Ocorrência',
-              'Abertura',
-              'Finalização',
-              'Status',
-              'Equipe',
-              'Falha Relatada',
-              'Falha Encontrada'
-            ],
-            data: historicoDocs.map((doc) {
-              var d = doc.data() as Map<String, dynamic>;
-              return [
-                (d['numero_da_ocorrencia'] ?? doc.id).toString(),
-                _formatarDataHoraCompleta(d['data_de_abertura']),
-                _formatarDataHoraCompleta(d['data_de_finalizacao']),
-                (d['status'] ?? '-').toString().toUpperCase(),
-                (d['equipe_atrelada'] ?? d['equipe_responsavel'] ?? '-')
-                    .toString(),
-                (d['tipo_da_falha'] ?? '-').toString(),
-                (d['falha_aparente_final'] ?? '-').toString(),
-              ];
-            }).toList(),
-            headerAlignment: pw.Alignment.center,
-            headerStyle: pw.TextStyle(
-                fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 9),
-            headerDecoration:
-                const pw.BoxDecoration(color: PdfColors.blueGrey800),
-            cellAlignment: pw.Alignment.center,
-            cellStyle: const pw.TextStyle(fontSize: 8),
+
+          // Usando pw.Table padrão para termos controle individual da fonte, tamanho e centralização vertical/horizontal
+          pw.Table(
+            border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+            defaultVerticalAlignment: pw.TableCellVerticalAlignment.middle, // Centraliza verticalmente todas as células
             columnWidths: {
-              0: const pw.FixedColumnWidth(60),
-              1: const pw.FixedColumnWidth(85),
-              2: const pw.FixedColumnWidth(85),
-              3: const pw.FixedColumnWidth(55),
-              4: const pw.FixedColumnWidth(80),
-              5: const pw.FlexColumnWidth(),
-              6: const pw.FlexColumnWidth(),
+              0: const pw.FixedColumnWidth(55), // Número da ocorrência alargado
+              1: const pw.FixedColumnWidth(50), // Abertura
+              2: const pw.FixedColumnWidth(50), // Fechamento
+              3: const pw.FixedColumnWidth(50), // Status
+              4: const pw.FixedColumnWidth(55), // Equipe
+              5: const pw.FlexColumnWidth(1.0), // Relatada
+              6: const pw.FlexColumnWidth(1.0), // Encontrada
+              7: const pw.FlexColumnWidth(1.0), // Ação
+              8: const pw.FlexColumnWidth(0.8), // Materiais (Levemente menor para compensar o aumento na Ocorrência)
             },
-          ),
+            children: [
+              // CABEÇALHO
+              pw.TableRow(
+                decoration: const pw.BoxDecoration(color: PdfColors.blueGrey800),
+                children: [
+                  'Nº\nOcorrências', 'Abertura', 'Finalização', 'Status', 'Equipe', 'Falha Relatada', 'Falha Encontrada', 'Ação Técnica', 'Materiais Utilizados'
+                ].map((t) => pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  alignment: pw.Alignment.center, // Centraliza texto horizontalmente no topo da célula
+                  child: pw.Text(t, textAlign: pw.TextAlign.center, style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 8))
+                )).toList()
+              ),
+              // DADOS
+              ...historicoDocs.map((doc) {
+                var d = doc.data() as Map<String, dynamic>;
+                
+                String materiaisStr = '-';
+                if (d['materiais_utilizados'] != null && (d['materiais_utilizados'] as List).isNotEmpty) {
+                   materiaisStr = (d['materiais_utilizados'] as List).map((m) => '${m['quantidade']}x ${m['material']}').join('\n');
+                }
+
+                return pw.TableRow(
+                  children: [
+                    pw.Container(padding: const pw.EdgeInsets.all(4), alignment: pw.Alignment.center, child: pw.Text((d['numero_da_ocorrencia'] ?? doc.id).toString(), textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7))),
+                    pw.Container(padding: const pw.EdgeInsets.all(4), alignment: pw.Alignment.center, child: pw.Text(_formatarDataHoraQuebrada(d['data_de_abertura']), textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7))),
+                    pw.Container(padding: const pw.EdgeInsets.all(4), alignment: pw.Alignment.center, child: pw.Text(_formatarDataHoraQuebrada(d['data_de_finalizacao']), textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7))),
+                    
+                    // STATUS COM FONTE MENOR (fontSize: 5) E CENTRALIZADO
+                    pw.Container(padding: const pw.EdgeInsets.all(4), alignment: pw.Alignment.center, child: pw.Text((d['status'] ?? '-').toString().toUpperCase(), textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 5))), 
+                    
+                    pw.Container(padding: const pw.EdgeInsets.all(4), alignment: pw.Alignment.center, child: pw.Text((d['equipe_atrelada'] ?? d['equipe_responsavel'] ?? '-').toString(), textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7))),
+                    pw.Container(padding: const pw.EdgeInsets.all(4), alignment: pw.Alignment.center, child: pw.Text((d['tipo_da_falha'] ?? '-').toString(), textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7))),
+                    pw.Container(padding: const pw.EdgeInsets.all(4), alignment: pw.Alignment.center, child: pw.Text((d['falha_aparente_final'] ?? '-').toString(), textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7))),
+                    pw.Container(padding: const pw.EdgeInsets.all(4), alignment: pw.Alignment.center, child: pw.Text((d['acao_equipe'] ?? '-').toString(), textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7))),
+                    pw.Container(padding: const pw.EdgeInsets.all(4), alignment: pw.Alignment.center, child: pw.Text(materiaisStr, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7))),
+                  ]
+                );
+              })
+            ]
+          )
         ],
       ),
     );
@@ -661,7 +694,7 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
 
     CellStyle centerStyle = CellStyle(horizontalAlign: HorizontalAlign.Center);
     for (int r = 0; r < sheetObject.maxRows; r++) {
-      for (int c = 0; c < sheetObject.maxRows; c++) { 
+      for (int c = 0; c < sheetObject.maxColumns; c++) { 
         var cell = sheetObject
             .cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r));
         cell.cellStyle = centerStyle;
@@ -677,10 +710,11 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
           name: 'Relatorio_Recorrencias.xlsx');
       await Share.shareXFiles([xfile], text: 'Relatório de Recorrências Top 10');
 
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Planilha baixada com sucesso!'),
             backgroundColor: Colors.green));
+      }
     }
   }
 
@@ -696,34 +730,50 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
     sheetObject.appendRow([TextCellValue("")]);
 
     sheetObject.appendRow([
-      TextCellValue("Nº Ocorrência"),
+      TextCellValue("Nº Ocorrências"), // Atualizado o cabeçalho no Excel
       TextCellValue("Abertura"),
       TextCellValue("Finalização"),
       TextCellValue("Status"),
       TextCellValue("Equipe"),
       TextCellValue("Falha Relatada"),
-      TextCellValue("Falha Encontrada")
+      TextCellValue("Falha Encontrada"),
+      TextCellValue("Ação Técnica"),
+      TextCellValue("Materiais Utilizados")
     ]);
 
     for (var doc in historicoDocs) {
       var d = doc.data() as Map<String, dynamic>;
+      
+      String materiaisStr = '-';
+      if (d['materiais_utilizados'] != null && (d['materiais_utilizados'] as List).isNotEmpty) {
+         materiaisStr = (d['materiais_utilizados'] as List).map((m) => '${m['quantidade']}x ${m['material']}').join(', ');
+      }
+
       sheetObject.appendRow([
         TextCellValue((d['numero_da_ocorrencia'] ?? doc.id).toString()),
-        TextCellValue(_formatarDataHoraCompleta(d['data_de_abertura'])),
-        TextCellValue(_formatarDataHoraCompleta(d['data_de_finalizacao'])),
+        TextCellValue(_formatarDataHoraQuebrada(d['data_de_abertura'])),
+        TextCellValue(_formatarDataHoraQuebrada(d['data_de_finalizacao'])),
         TextCellValue((d['status'] ?? '-').toString().toUpperCase()),
         TextCellValue((d['equipe_atrelada'] ?? d['equipe_responsavel'] ?? '-').toString()),
         TextCellValue((d['tipo_da_falha'] ?? '-').toString()),
         TextCellValue((d['falha_aparente_final'] ?? '-').toString()),
+        TextCellValue((d['acao_equipe'] ?? '-').toString()),
+        TextCellValue(materiaisStr),
       ]);
     }
 
-    CellStyle centerStyle = CellStyle(horizontalAlign: HorizontalAlign.Center);
+    // Aplica Wrap Text nas células para que o \n funcione no Excel
+    CellStyle centerStyle = CellStyle(horizontalAlign: HorizontalAlign.Center, textWrapping: TextWrapping.WrapText);
+    CellStyle statusStyle = CellStyle(horizontalAlign: HorizontalAlign.Center, textWrapping: TextWrapping.WrapText, fontSize: 8); // Fonte menor no Status do Excel
+
     for (int r = 0; r < sheetObject.maxRows; r++) {
-      for (int c = 0; c < sheetObject.maxRows; c++) { 
-        var cell = sheetObject
-            .cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r));
-        cell.cellStyle = centerStyle;
+      for (int c = 0; c < 9; c++) { 
+        var cell = sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r));
+        if (c == 3 && r >= 4) { // Coluna 3 é Status (Headers terminam na linha 3)
+          cell.cellStyle = statusStyle;
+        } else {
+          cell.cellStyle = centerStyle;
+        }
       }
     }
 
@@ -736,10 +786,11 @@ class _TelaRelatorioRecorrenciasState extends State<TelaRelatorioRecorrencias> {
           name: 'Historico_Semaforo_$semaforo.xlsx');
       await Share.shareXFiles([xfile], text: 'Histórico Semáforo $semaforo');
 
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Planilha baixada com sucesso!'),
             backgroundColor: Colors.green));
+      }
     }
   }
 

@@ -65,6 +65,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
   List<String> _opcoesSemaforos = [];
   List<String> _opcoesFalhas = [];
   List<String> _opcoesOrigens = [];
+  List<String> _opcoesMateriais = [];
 
   late Stream<QuerySnapshot> _streamOcorrencias;
   late Stream<QuerySnapshot> _streamEquipes;
@@ -154,11 +155,13 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
         FirebaseFirestore.instance.collection('falhas').get(),
         FirebaseFirestore.instance.collection('semaforos').get(),
         FirebaseFirestore.instance.collection('origens').get(),
+        FirebaseFirestore.instance.collection('materiais').get(),
       ]);
 
       final f = resultados[0];
       final s = resultados[1];
       final o = resultados[2];
+      final m = resultados[3];
 
       Map<String, String> prios = {};
       List<Map<String, dynamic>> falhasLocal = [];
@@ -196,9 +199,12 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
       }
 
       List<String> origensLocal = o.docs.map((doc) => ((doc.data() as Map<String, dynamic>)['origem'] ?? '').toString()).where((origem) => origem.isNotEmpty).toList();
+      List<String> materiaisLocal = m.docs.map((doc) => ((doc.data() as Map<String, dynamic>)['nome'] ?? (doc.data() as Map<String, dynamic>)['descricao'] ?? (doc.data() as Map<String, dynamic>)['material'] ?? '').toString().toUpperCase()).where((mat) => mat.isNotEmpty).toList();
+      
       origensLocal.sort();
       semaforosLocal.sort((a, b) => a['id'].toString().compareTo(b['id'].toString()));
       falhasLocal.sort((a, b) => a['falha'].toString().compareTo(b['falha'].toString()));
+      materiaisLocal.sort();
 
       if (mounted) {
         setState(() {
@@ -207,10 +213,10 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
           _semaforosAux = semaforosLocal;
           _falhasAux = falhasLocal;
           
-          // Geração Antecipada das Listas do Modal (Otimização)
           _opcoesSemaforos = semaforosLocal.map((sem) => "${sem['id']} - ${sem['endereco']}").toSet().toList();
           _opcoesFalhas = falhasLocal.map((fal) => fal['falha'] as String).toSet().toList();
           _opcoesOrigens = origensLocal.toSet().toList();
+          _opcoesMateriais = materiaisLocal.toSet().toList();
         });
       }
     } catch (e) {
@@ -345,16 +351,71 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                 ),
                 const Divider(),
                 const SizedBox(height: 10),
-                DropdownMenu<String>(
-                  expandedInsets: EdgeInsets.zero, 
-                  controller: semaforoMenuCtrl,
-                  enableFilter: true, enableSearch: true,
-                  label: const Text('Semáforo *'),
-                  inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
-                  initialSelection: semaforoDropdownValue.isEmpty ? null : semaforoDropdownValue,
-                  dropdownMenuEntries: _opcoesSemaforos.map((s) => DropdownMenuEntry(value: s, label: s)).toList(),
-                  onSelected: (val) => semaforoSel = val ?? '',
+                
+                // AUTOCOMPLETE DO SEMÁFORO (Igual ao tela_ocorrencias)
+                Autocomplete<String>(
+                  initialValue: TextEditingValue(text: semaforoDropdownValue),
+                  optionsBuilder: (TextEditingValue textEditingValue) {
+                    if (textEditingValue.text.isEmpty) {
+                      return _opcoesSemaforos;
+                    }
+                    return _opcoesSemaforos.where((String option) {
+                      return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
+                    });
+                  },
+                  onSelected: (String selection) {
+                    semaforoSel = selection;
+                    semaforoMenuCtrl.text = selection;
+                  },
+                  fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+                    textEditingController.addListener(() {
+                      semaforoMenuCtrl.text = textEditingController.text;
+                      semaforoSel = textEditingController.text;
+                    });
+                    
+                    return TextField(
+                      controller: textEditingController,
+                      focusNode: focusNode,
+                      inputFormatters: [UpperCaseTextFormatter()],
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(
+                        labelText: 'Semáforo *',
+                        hintText: 'Pesquisar Semáforo...',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                        suffixIcon: Icon(Icons.search),
+                      ),
+                    );
+                  },
+                  optionsViewBuilder: (context, onSelected, options) {
+                    return Align(
+                      alignment: Alignment.topLeft,
+                      child: Material(
+                        elevation: 4.0,
+                        borderRadius: BorderRadius.circular(4),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxHeight: 200, maxWidth: MediaQuery.of(context).size.width - 48),
+                          child: ListView.builder(
+                            padding: EdgeInsets.zero,
+                            shrinkWrap: true,
+                            itemCount: options.length,
+                            itemBuilder: (BuildContext context, int index) {
+                              final String option = options.elementAt(index);
+                              return InkWell(
+                                onTap: () => onSelected(option),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12.0),
+                                  child: Text(option),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
+                
                 const SizedBox(height: 12),
                 DropdownMenu<String>(
                   expandedInsets: EdgeInsets.zero,
@@ -489,8 +550,13 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
     bool estaArrastandoArea = false;
 
     String falha = dados['tipo_da_falha'] ?? '';
-    final descricaoCtrl = TextEditingController();
     final acaoCtrl = TextEditingController();
+    
+    // Controles para os materiais
+    List<Map<String, dynamic>> materiaisUsados = [];
+    final materialCtrl = TextEditingController();
+    final qtdCtrl = TextEditingController();
+
     List<Uint8List> fotosSelecionadas = [];
 
     if (falha.isNotEmpty && !_opcoesFalhas.contains(falha)) {
@@ -527,6 +593,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                       defeitoConstatado = v;
                       if (!defeitoConstatado) {
                         acaoCtrl.text = 'A EQUIPE RELATA QUE REALIZOU UMA VISTORIA COMPLETA E O SEMÁFORO NÃO APRESENTOU DEFEITO.';
+                        materiaisUsados.clear(); // Limpa materiais caso desmarque a opção
                       } else {
                         acaoCtrl.clear();
                       }
@@ -544,13 +611,6 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                     dropdownMenuEntries: _opcoesFalhas.map((f) => DropdownMenuEntry(value: f, label: f)).toList(),
                   ),
                   const SizedBox(height: 10),
-                  TextFormField(
-                    controller: descricaoCtrl,
-                    maxLines: 2,
-                    textCapitalization: TextCapitalization.characters,
-                    inputFormatters: [UpperCaseTextFormatter()],
-                    decoration: const InputDecoration(labelText: 'Como encontrou o semáforo? *', border: OutlineInputBorder()),
-                  ),
                 ],
                 const SizedBox(height: 10),
                 TextFormField(
@@ -561,6 +621,81 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                   decoration: const InputDecoration(labelText: 'Ação Técnica da Equipe *', border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 16),
+
+                // --- INÍCIO: MATERIAIS UTILIZADOS ---
+                if (defeitoConstatado) ...[
+                  const Text('MATERIAIS UTILIZADOS (Opcional)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: DropdownMenu<String>(
+                          expandedInsets: EdgeInsets.zero,
+                          controller: materialCtrl,
+                          enableFilter: true, enableSearch: true,
+                          label: const Text('Buscar Material'),
+                          inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
+                          dropdownMenuEntries: _opcoesMateriais.map((m) => DropdownMenuEntry(value: m, label: m)).toList(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 1,
+                        child: TextFormField(
+                          controller: qtdCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: 'Qtd', border: OutlineInputBorder(), isDense: true),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, padding: const EdgeInsets.symmetric(vertical: 16)),
+                        onPressed: () {
+                          if (materialCtrl.text.isNotEmpty && qtdCtrl.text.isNotEmpty) {
+                            setStateModal(() {
+                              materiaisUsados.add({
+                                'material': materialCtrl.text.toUpperCase(),
+                                'quantidade': qtdCtrl.text
+                              });
+                              materialCtrl.clear();
+                              qtdCtrl.clear();
+                            });
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione um material e informe a quantidade.')));
+                          }
+                        },
+                        child: const Icon(Icons.add, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                  if (materiaisUsados.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+                      child: Column(
+                        children: materiaisUsados.asMap().entries.map((e) {
+                          int idx = e.key;
+                          Map mat = e.value;
+                          return Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(child: Text('${mat['quantidade']}x - ${mat['material']}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                              InkWell(
+                                onTap: () => setStateModal(() => materiaisUsados.removeAt(idx)),
+                                child: const Icon(Icons.delete, color: Colors.red, size: 20),
+                              )
+                            ],
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                ],
+                // --- FIM: MATERIAIS UTILIZADOS ---
 
                 const Text('Fotos do Serviço (Max: 4)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
                 const SizedBox(height: 8),
@@ -691,8 +826,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                   onPressed: estaSalvando
                       ? null
                       : () async {
-                          if (defeitoConstatado && (falhaMenuCtrl.text.isEmpty || descricaoCtrl.text.isEmpty)) {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preencha a falha e descrição!')));
+                          if (defeitoConstatado && falhaMenuCtrl.text.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preencha a falha encontrada!')));
                             return;
                           }
                           if (acaoCtrl.text.isEmpty) {
@@ -714,13 +849,14 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                               'status': 'Finalizado',
                               'data_de_finalizacao': FieldValue.serverTimestamp(),
                               'falha_aparente_final': defeitoConstatado ? falhaMenuCtrl.text : 'DEFEITO NÃO CONSTATADO',
-                              'descricao_encontro': defeitoConstatado ? descricaoCtrl.text.toUpperCase() : 'DEFEITO NÃO CONSTATADO',
                               'acao_equipe': acaoCtrl.text.toUpperCase(),
+                              'materiais_utilizados': materiaisUsados,
                               'fotos_finalizacao': fotosBase64,
                               'usuario_finalizacao': nomeUsuario, 
                             });
 
                             if (mounted) Navigator.pop(context);
+                            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Atendimento concluído!'), backgroundColor: Colors.green));
                           } catch (e) {
                             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
                             setStateModal(() => estaSalvando = false);
@@ -1250,12 +1386,12 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                     if (coords != null) {
                       String st = (data['status'] ?? 'aberto').toString().toLowerCase();
                       
-                      String assetPath = 'images/aberto.png'; 
+                      String assetPath = 'assets/images/aberto.png'; 
 
                       if (st.contains('deslocamento')) {
-                        assetPath = 'images/deslocamento.png';
+                        assetPath = 'assets/images/deslocamento.png';
                       } else if (st.contains('atendimento')) {
-                        assetPath = 'images/atendimento.png';
+                        assetPath = 'assets/images/atendimento.png';
                       }
 
                       marcadores.add(

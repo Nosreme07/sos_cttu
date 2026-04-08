@@ -199,9 +199,20 @@ class _TelaRelatorioOcorrenciasState extends State<TelaRelatorioOcorrencias> {
                 _buildDetailRow('Falha Relatada', data['tipo_da_falha']),
                 _buildDetailRow('Detalhes Relatados', data['detalhes']),
                 _buildDetailRow('Falha Encontrada (Final)', data['falha_aparente_final']),
-                _buildDetailRow('Descrição do Encontro', data['descricao_encontro']),
                 _buildDetailRow('Ação Técnica', data['acao_equipe']),
                 
+                if (data['materiais_utilizados'] != null && (data['materiais_utilizados'] as List).isNotEmpty) ...[
+                  const Divider(),
+                  const Text('Materiais Utilizados:', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2c3e50), fontSize: 13)),
+                  const SizedBox(height: 6),
+                  ...(data['materiais_utilizados'] as List).map((mat) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text('${mat['quantidade']}x - ${mat['material']}', style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                    );
+                  }),
+                ],
+
                 if (data['fotos_finalizacao'] != null && (data['fotos_finalizacao'] as List).isNotEmpty) ...[
                   const Divider(),
                   const Text('Fotos da Finalização:', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2c3e50), fontSize: 13)),
@@ -328,6 +339,13 @@ class _TelaRelatorioOcorrenciasState extends State<TelaRelatorioOcorrencias> {
           pw.Text('Falha encontrada: ${dados['falha_aparente_final'] ?? '---'}'),
           pw.Text('Ação técnica: ${dados['acao_equipe'] ?? '---'}'),
           
+          if (dados['materiais_utilizados'] != null && (dados['materiais_utilizados'] as List).isNotEmpty) ...[
+            pw.SizedBox(height: 10),
+            pw.Text('MATERIAIS UTILIZADOS', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey)),
+            pw.SizedBox(height: 4),
+            ...(dados['materiais_utilizados'] as List).map((mat) => pw.Text('${mat['quantidade']}x - ${mat['material']}', style: const pw.TextStyle(fontSize: 11))),
+          ],
+          
           if (imagensPdf.isNotEmpty) ...[
             pw.SizedBox(height: 20),
             pw.Divider(),
@@ -425,13 +443,24 @@ class _TelaRelatorioOcorrenciasState extends State<TelaRelatorioOcorrencias> {
             pw.Text('Falha encontrada: ${dados['falha_aparente_final'] ?? '---'}'),
             pw.Text('Ação técnica: ${dados['acao_equipe'] ?? '---'}'),
             
+            if (dados['materiais_utilizados'] != null && (dados['materiais_utilizados'] as List).isNotEmpty) ...[
+              pw.SizedBox(height: 10),
+              pw.Text('MATERIAIS UTILIZADOS', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey)),
+              pw.SizedBox(height: 4),
+              ...(dados['materiais_utilizados'] as List).map((mat) => pw.Text('${mat['quantidade']}x - ${mat['material']}', style: const pw.TextStyle(fontSize: 11))),
+            ],
+
             if (imagensPdf.isNotEmpty) ...[
               pw.SizedBox(height: 20),
               pw.Divider(),
               pw.SizedBox(height: 10),
               pw.Text('FOTOS ANEXADAS:', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
               pw.SizedBox(height: 10),
-              pw.Wrap(spacing: 10, runSpacing: 10, children: imagensPdf)
+              pw.Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: imagensPdf,
+              )
             ]
           ],
         ),
@@ -482,7 +511,7 @@ class _TelaRelatorioOcorrenciasState extends State<TelaRelatorioOcorrencias> {
       TextCellValue("Falha Relatada"),
       TextCellValue("Detalhes Relatados"),
       TextCellValue("Falha Encontrada (Final)"),
-      TextCellValue("Descrição do Encontro"),
+      TextCellValue("Materiais Utilizados"),
       TextCellValue("Ação Técnica")
     ]);
 
@@ -508,7 +537,12 @@ class _TelaRelatorioOcorrenciasState extends State<TelaRelatorioOcorrencias> {
         TextCellValue((d['tipo_da_falha'] ?? '-').toString()),
         TextCellValue((d['detalhes'] ?? '-').toString()),
         TextCellValue((d['falha_aparente_final'] ?? '-').toString()),
-        TextCellValue((d['descricao_encontro'] ?? '-').toString()),
+        TextCellValue(() {
+          if (d['materiais_utilizados'] != null && (d['materiais_utilizados'] as List).isNotEmpty) {
+            return (d['materiais_utilizados'] as List).map((m) => '${m['quantidade']}x ${m['material']}').join(', ');
+          }
+          return '-';
+        }()),
         TextCellValue((d['acao_equipe'] ?? '-').toString()),
       ]);
     }
