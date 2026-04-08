@@ -13,6 +13,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/services.dart';
+import '../programacao/tela_programacao.dart';
 
 import '../../widgets/menu_usuario.dart';
 
@@ -252,6 +253,20 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
     }
   }
 
+  String _formatarDataHora(dynamic t) {
+    if (t == null) return '---';
+    if (t is Timestamp) return DateFormat('dd/MM/yy HH:mm\'h\'').format(t.toDate());
+    if (t is DateTime) return DateFormat('dd/MM/yy HH:mm\'h\'').format(t);
+    return t.toString(); 
+  }
+
+  String _formatarDataHoraCompleta(dynamic t) {
+    if (t == null) return '---';
+    if (t is Timestamp) return DateFormat('dd/MM/yyyy HH:mm:ss').format(t.toDate());
+    if (t is DateTime) return DateFormat('dd/MM/yyyy HH:mm:ss').format(t);
+    return t.toString(); 
+  }
+
   String _calcularPrazo(Timestamp? dataAbertura, dynamic minutosPrazoStr) {
     if (dataAbertura == null || minutosPrazoStr == null) return 'Indefinido';
     int minutos = int.tryParse(minutosPrazoStr.toString()) ?? 0;
@@ -271,6 +286,24 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
   bool _maisDe24h(Timestamp? dataAbertura) {
     if (dataAbertura == null) return false;
     return DateTime.now().difference(dataAbertura.toDate()).inHours >= 24;
+  }
+
+  int _getStatusWeight(String statusRaw) {
+    String st = statusRaw.toLowerCase();
+    if (st.contains('aberto') || st.contains('pendente') || st.contains('aguardando')) return 1;
+    if (st.contains('deslocamento')) return 2;
+    if (st.contains('atendimento')) return 3;
+    if (st.contains('conclu') || st.contains('finaliz')) return 4;
+    return 5; 
+  }
+
+  Color _corStatusReal(String statusRaw) {
+    String st = statusRaw.toLowerCase();
+    if (st.contains('aberto') || st.contains('pendente') || st.contains('aguardando')) return Colors.redAccent;
+    if (st.contains('deslocamento')) return Colors.orange;
+    if (st.contains('atendimento')) return Colors.green;
+    if (st.contains('conclu') || st.contains('finaliz')) return Colors.blueGrey;
+    return Colors.grey;
   }
 
   bool _passouNoFiltro(Map<String, dynamic> data) {
@@ -352,7 +385,6 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                 const Divider(),
                 const SizedBox(height: 10),
                 
-                // AUTOCOMPLETE DO SEMÁFORO (Igual ao tela_ocorrencias)
                 Autocomplete<String>(
                   initialValue: TextEditingValue(text: semaforoDropdownValue),
                   optionsBuilder: (TextEditingValue textEditingValue) {
@@ -552,7 +584,6 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
     String falha = dados['tipo_da_falha'] ?? '';
     final acaoCtrl = TextEditingController();
     
-    // Controles para os materiais
     List<Map<String, dynamic>> materiaisUsados = [];
     final materialCtrl = TextEditingController();
     final qtdCtrl = TextEditingController();
@@ -593,7 +624,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                       defeitoConstatado = v;
                       if (!defeitoConstatado) {
                         acaoCtrl.text = 'A EQUIPE RELATA QUE REALIZOU UMA VISTORIA COMPLETA E O SEMÁFORO NÃO APRESENTOU DEFEITO.';
-                        materiaisUsados.clear(); // Limpa materiais caso desmarque a opção
+                        materiaisUsados.clear(); 
                       } else {
                         acaoCtrl.clear();
                       }
@@ -956,6 +987,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
     }
   }
 
+  // --- NOVA VISUALIZAÇÃO DE DETALHES TIPO CARD ---
   void _abrirDetalhes(String docId, Map<String, dynamic> data) {
     String st = (data['status'] ?? 'aberto').toString().toLowerCase();
     Color corBase = Colors.redAccent;
@@ -1063,6 +1095,81 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 TextButton.icon(
+                  icon: const Icon(Icons.history, color: Colors.blueGrey),
+                  label: const Text('Histórico (Últimas 5)', style: TextStyle(color: Colors.blueGrey)),
+                  onPressed: () {
+                    String numSem = _formatarId(data['semaforo']?.toString() ?? '');
+                    var hist = _todasOcorrencias.where((oc) {
+                      var d = oc.data() as Map<String, dynamic>;
+                      return _formatarId(d['semaforo']?.toString() ?? '') == numSem;
+                    }).toList();
+                    hist.sort((a, b) {
+                      var dA = a.data() as Map<String, dynamic>;
+                      var dB = b.data() as Map<String, dynamic>;
+                      DateTime dtA = dA['data_de_abertura'] != null ? (dA['data_de_abertura'] as Timestamp).toDate() : DateTime.fromMillisecondsSinceEpoch(0);
+                      DateTime dtB = dB['data_de_abertura'] != null ? (dB['data_de_abertura'] as Timestamp).toDate() : DateTime.fromMillisecondsSinceEpoch(0);
+                      return dtB.compareTo(dtA);
+                    });
+                    
+                    showDialog(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        backgroundColor: const Color(0xFFE8EAF6),
+                        title: Text('Histórico de Recorrência do $numSem', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey, fontSize: 18)),
+                        content: SizedBox(
+                          width: 500,
+                          child: ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: hist.length > 5 ? 5 : hist.length,
+                            itemBuilder: (c, i) {
+                              var d = hist[i].data() as Map<String, dynamic>;
+                              return Card(
+                                margin: const EdgeInsets.only(bottom: 12),
+                                elevation: 1,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      InkWell(
+                                        onTap: () {
+                                          Navigator.pop(ctx);
+                                          _abrirDetalhesCompletos(d);
+                                        },
+                                        child: Text(
+                                          'Nº Ocorrência: ${d['numero_da_ocorrencia'] ?? hist[i].id}',
+                                          style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, decoration: TextDecoration.underline, fontSize: 15),
+                                        ),
+                                      ),
+                                      const Divider(),
+                                      const SizedBox(height: 4),
+                                      Text('Abertura: ${_formatarDataHoraCompleta(d['data_de_abertura'])}', style: const TextStyle(fontSize: 12, color: Colors.black87)),
+                                      Text('Fechamento: ${_formatarDataHoraCompleta(d['data_de_finalizacao'])}', style: const TextStyle(fontSize: 12, color: Colors.black87)),
+                                      Text('Equipe Responsável: ${d['equipe_atrelada'] ?? d['equipe_responsavel'] ?? '-'}', style: const TextStyle(fontSize: 12, color: Colors.black87)),
+                                      Text('Falha relatada: ${d['tipo_da_falha'] ?? '-'}', style: const TextStyle(fontSize: 12, color: Colors.black87)),
+                                      RichText(
+                                        text: TextSpan(
+                                          style: const TextStyle(fontSize: 12, color: Colors.black87),
+                                          children: [
+                                            const TextSpan(text: 'Falha encontrada: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                                            TextSpan(text: (d['falha_aparente_final'] ?? '-').toString()),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }
+                          )
+                        ),
+                        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fechar', style: TextStyle(fontWeight: FontWeight.bold)))]
+                      )
+                    );
+                  },
+                ),
+                TextButton.icon(
                   icon: const Icon(Icons.map, color: Colors.blueGrey),
                   label: const Text('Google Maps', style: TextStyle(color: Colors.blueGrey)),
                   onPressed: () async {
@@ -1094,7 +1201,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
             ),
             
             const SizedBox(height: 10),
-            ElevatedButton.icon(
+ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.purple.shade600,
                 padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1102,11 +1209,16 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
               icon: const Icon(Icons.settings_input_component, color: Colors.white),
               label: const Text('Acessar Programação', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Módulo de programação será implantado em breve!'),
-                    backgroundColor: Colors.purple,
-                  )
+                // Extrai apenas os números (ex: se for "002 - AV..." vai pegar "002")
+                String numSem = (data['semaforo']?.toString() ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+                if (numSem.isNotEmpty) numSem = numSem.padLeft(3, '0');
+
+                Navigator.pop(context); // Fecha o modal de detalhes
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => TelaProgramacao(semaforoInicial: numSem),
+                  ),
                 );
               },
             ),
@@ -1125,6 +1237,105 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
           children: [
             TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
             TextSpan(text: (value ?? '---').toString()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- MODAL DE DETALHES COMPLETOS (BOTTOM SHEET) ---
+  void _abrirDetalhesCompletos(Map<String, dynamic> data) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.85,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Detalhes: ${data['numero_da_ocorrencia'] ?? data['id'] ?? 'S/N'}',
+                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey, fontSize: 18),
+                ),
+                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+              ],
+            ),
+            const Divider(),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildInfoRow('Semáforo / End.', '${data['semaforo']} - ${data['endereco']}'),
+                    _buildInfoRow('Empresa', data['empresa_semaforo'] ?? data['empresa_responsavel']),
+                    _buildInfoRow('Origem', data['origem_da_ocorrencia']),
+                    const Divider(),
+                    _buildInfoRow('Data Abertura', _formatarDataHoraCompleta(data['data_de_abertura'])),
+                    _buildInfoRow('Data Atendimento', _formatarDataHoraCompleta(data['data_atendimento'])),
+                    _buildInfoRow('Data Finalização', _formatarDataHoraCompleta(data['data_de_finalizacao'])),
+                    const Divider(),
+                    _buildInfoRow('Usuário Abertura', data['usuario_abertura'] ?? data['usuario']),
+                    _buildInfoRow('Equipe Resp.', data['equipe_atrelada'] ?? data['equipe_responsavel']),
+                    _buildInfoRow('Placa', data['placa_veiculo']),
+                    const Divider(),
+                    _buildInfoRow('Status', data['status']?.toString().toUpperCase()),
+                    _buildInfoRow('Falha Relatada', data['tipo_da_falha']),
+                    _buildInfoRow('Detalhes/Abertura', data['detalhes']),
+                    _buildInfoRow('Falha Encontrada', data['falha_aparente_final']),
+                    _buildInfoRow('Ação Técnica', data['acao_equipe']),
+                    
+                    if (data['materiais_utilizados'] != null && (data['materiais_utilizados'] as List).isNotEmpty) ...[
+                      const Divider(),
+                      const Text('Materiais Utilizados:', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2c3e50), fontSize: 13)),
+                      const SizedBox(height: 6),
+                      ...(data['materiais_utilizados'] as List).map((mat) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Text('${mat['quantidade']}x - ${mat['material']}', style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                        );
+                      }),
+                    ],
+                    
+                    if (data['fotos_finalizacao'] != null && (data['fotos_finalizacao'] as List).isNotEmpty) ...[
+                      const Divider(),
+                      const Text('Fotos da Finalização:', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2c3e50), fontSize: 13)),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: (data['fotos_finalizacao'] as List).map((base64Str) {
+                          try {
+                            return ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.memory(base64Decode(base64Str), width: 100, height: 100, fit: BoxFit.cover),
+                            );
+                          } catch (e) {
+                            return const SizedBox.shrink();
+                          }
+                        }).toList(),
+                      ),
+                    ]
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 45),
+                backgroundColor: Colors.blueGrey,
+              ),
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Voltar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
           ],
         ),
       ),
@@ -1376,22 +1587,39 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                     (doc) => _passouNoFiltro(doc.data() as Map<String, dynamic>)
                   ).toList();
 
-                  List<Marker> marcadores = [];
+                  // Agrupando ocorrências por Semáforo (para o caso de múltiplos pinos no mesmo lugar)
+                  Map<String, List<QueryDocumentSnapshot>> mapaAgrupado = {};
                   for (var doc in ocorrenciasParaMapa) {
                     var data = doc.data() as Map<String, dynamic>;
-                    
                     String numSem = _formatarId(data['semaforo']?.toString() ?? '');
-                    LatLng? coords = _mapaCoordenadasSemaforos[numSem];
-                    
-                    if (coords != null) {
-                      String st = (data['status'] ?? 'aberto').toString().toLowerCase();
-                      
-                      String assetPath = 'assets/images/aberto.png'; 
+                    if (!mapaAgrupado.containsKey(numSem)) {
+                      mapaAgrupado[numSem] = [];
+                    }
+                    mapaAgrupado[numSem]!.add(doc);
+                  }
 
-                      if (st.contains('deslocamento')) {
-                        assetPath = 'assets/images/deslocamento.png';
-                      } else if (st.contains('atendimento')) {
-                        assetPath = 'assets/images/atendimento.png';
+                  List<Marker> marcadores = [];
+                  mapaAgrupado.forEach((numSem, listaDocs) {
+                    LatLng? coords = _mapaCoordenadasSemaforos[numSem];
+                    if (coords != null) {
+                      // Determina o status "pior" para exibir o ícone correto
+                      int piorPeso = 99;
+                      String assetPath = 'assets/images/aberto.png'; 
+                      
+                      for (var d in listaDocs) {
+                        var data = d.data() as Map<String, dynamic>;
+                        String st = (data['status'] ?? 'aberto').toString().toLowerCase();
+                        int w = _getStatusWeight(st);
+                        if (w < piorPeso) {
+                          piorPeso = w;
+                          if (st.contains('deslocamento')) {
+                            assetPath = 'assets/images/deslocamento.png';
+                          } else if (st.contains('atendimento')) {
+                            assetPath = 'assets/images/atendimento.png';
+                          } else {
+                            assetPath = 'assets/images/aberto.png';
+                          }
+                        }
                       }
 
                       marcadores.add(
@@ -1401,16 +1629,66 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                           height: 70, 
                           alignment: Alignment.topCenter,
                           child: GestureDetector(
-                            onTap: () => _abrirDetalhes(doc.id, data),
+                            onTap: () {
+                              if (listaDocs.length == 1) {
+                                // Se for só 1, abre direto
+                                _abrirDetalhes(listaDocs.first.id, listaDocs.first.data() as Map<String, dynamic>);
+                              } else {
+                                // Se tiver mais de 1, abre modal para escolher
+                                showDialog(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: Text('Ocorrências no Semáforo $numSem', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                                    content: SizedBox(
+                                      width: double.maxFinite,
+                                      child: ListView.builder(
+                                        shrinkWrap: true,
+                                        itemCount: listaDocs.length,
+                                        itemBuilder: (c, i) {
+                                          var data = listaDocs[i].data() as Map<String, dynamic>;
+                                          return Card(
+                                            margin: const EdgeInsets.only(bottom: 8),
+                                            child: ListTile(
+                                              title: Text(data['tipo_da_falha'] ?? ''),
+                                              subtitle: Text('Status: ${data['status']}'),
+                                              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                                              onTap: () {
+                                                Navigator.pop(ctx); // Fecha a lista
+                                                _abrirDetalhes(listaDocs[i].id, data); // Abre os detalhes da selecionada
+                                              },
+                                            ),
+                                          );
+                                        }
+                                      )
+                                    ),
+                                    actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fechar'))]
+                                  )
+                                );
+                              }
+                            },
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Image.asset(
-                                  assetPath,
-                                  width: 40,
-                                  height: 40,
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (context, error, stackTrace) => const Icon(Icons.warning, color: Colors.red),
+                                Stack(
+                                  children: [
+                                    Image.asset(
+                                      assetPath,
+                                      width: 40,
+                                      height: 40,
+                                      fit: BoxFit.contain,
+                                      errorBuilder: (context, error, stackTrace) => const Icon(Icons.warning, color: Colors.red),
+                                    ),
+                                    if (listaDocs.length > 1) // Mostra selo se tiver mais de uma
+                                      Positioned(
+                                        right: 0,
+                                        top: 0,
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                                          child: Text('${listaDocs.length}', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                        ),
+                                      )
+                                  ]
                                 ),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -1431,7 +1709,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> {
                         ),
                       );
                     }
-                  }
+                  });
 
                   return Column(
                     children: [

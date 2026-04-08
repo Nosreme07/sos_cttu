@@ -508,7 +508,9 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
 // TELA PRINCIPAL (APP)
 // ==========================================
 class TelaProgramacao extends StatefulWidget {
-  const TelaProgramacao({super.key});
+  final String? semaforoInicial; // <--- NOVO PARÂMETRO PARA RECEBER O COMANDO
+
+  const TelaProgramacao({super.key, this.semaforoInicial});
 
   @override
   State<TelaProgramacao> createState() => _TelaProgramacaoState();
@@ -522,9 +524,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
   String _subarea = "---";
   List<String> _listaSubareas = [];
   
-  // Auditoria
   String _ultimaAtualizacaoFormatada = "";
-  
   String _observacoes = "";
 
   List<dynamic> _grupos = [];
@@ -538,7 +538,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
   void initState() {
     super.initState();
     _carregarSubareasBanco();
-    _carregarSemaforosBanco();
+    _carregarSemaforosBanco(); // Esta função agora lida com o semaforoInicial no final
   }
 
   Color _obterCorDoPlano(String planId) {
@@ -573,9 +573,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
       List<String> subs = snap.docs.map((d) => d['nome'].toString()).toList();
       subs.sort();
       if (mounted) setState(() { _listaSubareas = subs; });
-    } catch(e) {
-      debugPrint("Erro ao buscar subareas: $e");
-    }
+    } catch(e) {}
   }
 
   Future<void> _carregarSemaforosBanco() async {
@@ -607,7 +605,28 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
         listaTemporaria.insert(0, demoItem);
       }
 
-      if (mounted) setState(() { _listaSemaforosDropdown = listaTemporaria; _carregandoSemaforos = false; });
+      if (mounted) {
+        setState(() { 
+          _listaSemaforosDropdown = listaTemporaria; 
+          _carregandoSemaforos = false; 
+        });
+
+        // --- LÓGICA PARA AUTO-PREENCHER VINDO DO MAPA OU OCORRÊNCIAS ---
+        if (widget.semaforoInicial != null && widget.semaforoInicial!.isNotEmpty) {
+           try {
+             var itemEncontrado = _listaSemaforosDropdown.firstWhere(
+               (item) => item['label']!.startsWith(widget.semaforoInicial!)
+             );
+             setState(() {
+               _semaforoSelecionado = itemEncontrado['value'];
+               _subarea = itemEncontrado['subarea'] ?? "---";
+             });
+             _carregarProgramacaoDoSemaforo(_semaforoSelecionado!);
+           } catch (e) {
+             debugPrint("Semáforo inicial não encontrado: ${widget.semaforoInicial}");
+           }
+        }
+      }
     } catch (e) {
       if (mounted) setState(() { _listaSemaforosDropdown = [{'value': 'DEMO', 'label': '000 - SEMÁFORO DEMO (Teste Visual)'}]; _carregandoSemaforos = false; });
     }
@@ -681,9 +700,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     setState(() => _modoEdicao = !_modoEdicao);
   }
 
-  // ==========================================
-  // FUNÇÃO: ZERAR TUDO E FUNÇÕES INDIVIDUAIS
-  // ==========================================
   void _zerarTudo() {
     showDialog(
       context: context,
@@ -723,7 +739,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
               setState(() { _planos.removeAt(index); });
               Navigator.pop(ctx);
             },
-            child: const Text('Excluir'),
+            child: const Text('Excluir', style: TextStyle(color: Colors.white)),
           )
         ]
       )
@@ -756,16 +772,10 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     );
   }
 
-  // ==========================================
-  // FUNÇÃO: CONVERTER COLOR PARA PDFCOLOR
-  // ==========================================
   PdfColor _getPdfColor(Color c) {
     return PdfColor(c.red / 255.0, c.green / 255.0, c.blue / 255.0);
   }
 
-  // ==========================================
-  // FUNÇÃO: EXPORTAR PARA PDF
-  // ==========================================
   Future<void> _exportarPdf() async {
     if (_semaforoSelecionado == null) return;
 
@@ -785,7 +795,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
       )['label']!;
 
       pw.Widget buildPdfGantt(List groups, int tc) {
-        double ganttWidth = 360.0; // Expandido para ocupar o espaço das colunas removidas
+        double ganttWidth = 360.0; 
         double rowHeight = 18.0; 
         double rulerHeight = 15.0;
 
@@ -811,7 +821,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
           }
         }
 
-        double currentY = rulerHeight + 5; // Inicia em 20
+        double currentY = rulerHeight + 5;
 
         for (var g in groups) {
            int start = int.tryParse(g['start']?.toString() ?? '0') ?? 0;
@@ -836,7 +846,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                  stackChildren.add(
                    pw.Positioned(
                      left: (s / tc) * ganttWidth, 
-                     top: currentY + 3, // Centraliza a barra perfeitamente com a altura da linha da tabela (18px)
+                     top: currentY + 3, 
                      child: pw.Container(width: (dur / tc) * ganttWidth, height: 12, color: color, alignment: pw.Alignment.center, child: txt != null ? pw.Text(txt, style: pw.TextStyle(color: PdfColors.white, fontSize: 6, fontWeight: pw.FontWeight.bold)) : null)
                    )
                  );
@@ -1012,22 +1022,22 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                               crossAxisAlignment: pw.CrossAxisAlignment.start,
                               children: [
                                 pw.Container(
-                                  width: 160, // Tabela menor e focada apenas nos tempos
+                                  width: 160, 
                                   padding: const pw.EdgeInsets.only(top: 4, bottom: 4, left: 4),
                                   child: groups.isNotEmpty 
                                     ? pw.Table(
                                         border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
                                         columnWidths: {
-                                          0: const pw.FixedColumnWidth(40), // Verde
-                                          1: const pw.FixedColumnWidth(40), // Amarelo
-                                          2: const pw.FixedColumnWidth(40), // Vm.Geral
-                                          3: const pw.FixedColumnWidth(40), // Entreverde
+                                          0: const pw.FixedColumnWidth(40), 
+                                          1: const pw.FixedColumnWidth(40), 
+                                          2: const pw.FixedColumnWidth(40), 
+                                          3: const pw.FixedColumnWidth(40), 
                                         },
                                         children: [
                                           pw.TableRow(
                                             children: ['Verde', 'Amarelo', 'Vm.Geral', 'Entreverde'].map((t) => 
                                               pw.Container(
-                                                height: 20, // Altura de régua do Gantt
+                                                height: 20, 
                                                 alignment: pw.Alignment.center, 
                                                 child: pw.Text(t, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey800))
                                               )
@@ -1055,7 +1065,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                                     : pw.Text('Nenhum grupo configurado.', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey))
                                 ),
                                 pw.Container(
-                                  width: 376, // Gráfico expandido ocupando o novo espaço
+                                  width: 376, 
                                   padding: const pw.EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4),
                                   child: buildPdfGantt(groups, tc)
                                 )
@@ -1070,7 +1080,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                 pw.SizedBox(height: 20),
               ],
 
-              // QUEBRA DE PÁGINA IMPEDIDA COM pw.Wrap()
               if (_observacoes.isNotEmpty) ...[
                 pw.Wrap(
                   children: [
@@ -1103,9 +1112,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     }
   }
 
-  // ==========================================
-  // MODAL OBSERVAÇÕES
-  // ==========================================
   void _abrirModalObservacoes() {
     final TextEditingController obsController = TextEditingController(text: _observacoes);
 
@@ -1160,9 +1166,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     );
   }
 
-  // ==========================================
-  // MODAL DEFINIR GRUPOS (EDIÇÃO E INSERÇÃO)
-  // ==========================================
   void _abrirModalDefinirGrupos() {
     int passoAtual = _grupos.isNotEmpty ? 2 : 1; 
     int quantidadeGrupos = _grupos.length; 
@@ -1334,7 +1337,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     );
   }
 
-  // MODAL DEFINIR PLANO
   void _abrirModalDefinirPlano() {
     final formKey = GlobalKey<FormState>();
     String? planoSelecionado;
@@ -1343,7 +1345,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     final vGeralCtrl = TextEditingController(text: '2');
     bool salvando = false;
 
-    // Gera do 02 até 15
     List<String> opcoesPlano = List.generate(14, (i) => (i + 2).toString().padLeft(2, '0'));
 
     showDialog(
@@ -1433,9 +1434,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     );
   }
 
-  // ==========================================
-  // FUNÇÃO: EDITAR AGENDAMENTO EXISTENTE (NA TELA)
-  // ==========================================
   void _editarAgendamentoExistente(String dia, int index, Map ev) {
     String horaAtual = ev['hora'].split(':')[0];
     String minAtual = ev['hora'].split(':')[1];
@@ -1494,7 +1492,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                    String novoNome = _planos.firstWhere((p) => p['planId'] == planoAtual)['type'] == 'special' ? 'MODO $planoAtual' : 'PLANO $planoAtual';
                    String novaHora = '$horaAtual:$minAtual';
                    
-                   // Checa se já existe esse horário no dia (ignorando ele mesmo)
                    bool jaExiste = false;
                    for(int i=0; i<_agendamento[dia].length; i++) {
                      if (i != index && _agendamento[dia][i]['hora'] == novaHora) jaExiste = true;
@@ -1520,9 +1517,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     );
   }
 
-  // ==========================================
-  // MODAL AGENDAMENTO
-  // ==========================================
   void _abrirModalAgendamento() {
     String horaSelecionada = '12'; String minutoSelecionado = '00'; String diaMarcado = 'Todos os dias'; String? planoMarcado; bool salvando = false;
     Map<String, List<dynamic>> agendamentoTemp = {};
@@ -1691,7 +1685,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
 
                                                         return InkWell(
                                                           onTap: () {
-                                                            if (_modoEdicao) { 
+                                                            if (_modoEdicao) {
                                                               _editarAgendamentoExistente(diaChave, index, ev);
                                                             }
                                                           },
@@ -1755,9 +1749,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     );
   }
 
-  // ==========================================
-  // COMPONENTES DE UI DA TELA PRINCIPAL
-  // ==========================================
   Widget _buildSectionTitle(String title) {
     return Container(
       width: double.infinity, padding: const EdgeInsets.all(10),
@@ -1773,9 +1764,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
     );
   }
 
-  // ==========================================
-  // SALVAMENTO GLOBAL NO BANCO E AUDITORIA
-  // ==========================================
   void _iniciarSalvamentoComMotivo() {
     if (_semaforoSelecionado == 'DEMO') {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Modo DEMO não salva no banco de dados!'), backgroundColor: Colors.orange));
@@ -1838,9 +1826,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
           return d['nomeCompleto'].toString().toUpperCase();
         }
       }
-    } catch (e) {
-      debugPrint('Erro ao buscar nome: $e');
-    }
+    } catch (e) {}
     return (user.displayName ?? user.email ?? 'SISTEMA').toUpperCase();
   }
 
@@ -1895,7 +1881,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // --- PAINEL DE CONFIGURAÇÃO TOPO ---
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: const Border(top: BorderSide(color: Colors.orange, width: 4)), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10)]),
@@ -2058,7 +2043,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                     ),
                     const SizedBox(height: 20),
 
-                    // --- AGENDAMENTO SEMANAL ---
                     if (_agendamento.isNotEmpty) ...[
                       _buildSectionTitle('AGENDAMENTO SEMANAL'),
                       Container(
@@ -2112,7 +2096,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                       const SizedBox(height: 20),
                     ],
 
-                    // --- TEMPOS DOS PLANOS (EDITÁVEIS) ---
                     if (_planos.isNotEmpty) ...[
                       _buildSectionTitle('TEMPOS DOS PLANOS'),
                       
@@ -2130,7 +2113,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                       }), 
                     ],
 
-                    // --- OBSERVAÇÕES DO PROJETO ---
                     if (_observacoes.isNotEmpty) ...[
                       const SizedBox(height: 20),
                       _buildSectionTitle('OBSERVAÇÕES DO PROJETO'),
