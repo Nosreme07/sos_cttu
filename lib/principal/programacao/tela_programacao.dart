@@ -94,6 +94,7 @@ class PlanoEditorWidget extends StatefulWidget {
   final Map<String, dynamic> plano;
   final List<dynamic> gruposGlobais;
   final bool modoEdicao;
+  final bool podeEditarTudo; // <-- ADICIONADO PARA CONTROLAR A VISÃO DE COLUNAS
   final VoidCallback onUpdate;
   final VoidCallback? onDelete;
   final VoidCallback? onEdit;
@@ -103,6 +104,7 @@ class PlanoEditorWidget extends StatefulWidget {
     required this.plano,
     required this.gruposGlobais,
     required this.modoEdicao,
+    required this.podeEditarTudo,
     required this.onUpdate,
     this.onDelete,
     this.onEdit,
@@ -397,16 +399,19 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
                     Container(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.grey.shade300))),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceAround,
                         children: [
-                          Expanded(flex: 2, child: Text('Grupo', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
-                          Expanded(flex: 2, child: Text('Início', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
-                          Expanded(flex: 2, child: Text('Fim', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
-                          Expanded(flex: 2, child: Text('Verde', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
-                          Expanded(flex: 2, child: Text('Amarelo', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
-                          Expanded(flex: 2, child: Text('Vm.Geral', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
-                          Expanded(flex: 2, child: Text('Entreverde', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+                          const Expanded(flex: 2, child: Text('Grupo', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+                          if (widget.podeEditarTudo) ...[
+                            const Expanded(flex: 2, child: Text('Início', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+                            const Expanded(flex: 2, child: Text('Fim', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+                          ],
+                          const Expanded(flex: 2, child: Text('Verde', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+                          const Expanded(flex: 2, child: Text('Amarelo', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+                          const Expanded(flex: 2, child: Text('Vm.Geral', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+                          if (widget.podeEditarTudo)
+                            const Expanded(flex: 2, child: Text('Entreverde', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
                         ],
                       ),
                     ),
@@ -426,12 +431,15 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
                           mainAxisAlignment: MainAxisAlignment.spaceAround,
                           children: [
                             Expanded(flex: 2, child: Text(g['id'], textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 12))),
-                            Expanded(flex: 2, child: Center(child: _buildInput(g['startCtrl']))),
-                            Expanded(flex: 2, child: Center(child: _buildInput(g['endCtrl']))),
+                            if (widget.podeEditarTudo) ...[
+                              Expanded(flex: 2, child: Center(child: _buildInput(g['startCtrl']))),
+                              Expanded(flex: 2, child: Center(child: _buildInput(g['endCtrl']))),
+                            ],
                             Expanded(flex: 2, child: Center(child: Container(width: 45, height: 26, alignment: Alignment.center, decoration: BoxDecoration(color: Colors.green.shade50, border: Border.all(color: Colors.green.shade200), borderRadius: BorderRadius.circular(4)), child: Text('$verde', style: TextStyle(color: Colors.green.shade700, fontWeight: FontWeight.bold, fontSize: 12))))),
                             Expanded(flex: 2, child: Center(child: _buildInput(g['yellowCtrl'], bg: Colors.amber.shade50, textC: Colors.orange.shade800))),
                             Expanded(flex: 2, child: Center(child: _buildInput(g['allRedCtrl'], bg: Colors.red.shade50, textC: Colors.red.shade800))),
-                            Expanded(flex: 2, child: Center(child: Container(width: 45, height: 26, alignment: Alignment.center, child: Text('$entreverde', style: const TextStyle(color: Colors.black54, fontSize: 12))))),
+                            if (widget.podeEditarTudo)
+                              Expanded(flex: 2, child: Center(child: Container(width: 45, height: 26, alignment: Alignment.center, child: Text('$entreverde', style: const TextStyle(color: Colors.black54, fontSize: 12))))),
                           ],
                         ),
                       );
@@ -505,10 +513,10 @@ class _PlanoEditorWidgetState extends State<PlanoEditorWidget> {
 }
 
 // ==========================================
-// TELA PRINCIPAL (APP)
+// TELA PRINCIPAL DA PROGRAMAÇÃO
 // ==========================================
 class TelaProgramacao extends StatefulWidget {
-  final String? semaforoInicial; // <--- NOVO PARÂMETRO PARA RECEBER O COMANDO
+  final String? semaforoInicial; 
 
   const TelaProgramacao({super.key, this.semaforoInicial});
 
@@ -518,7 +526,7 @@ class TelaProgramacao extends StatefulWidget {
 
 class _TelaProgramacaoState extends State<TelaProgramacao> {
   String? _semaforoSelecionado;
-  bool _modoEdicao = false;
+  bool _modoEdicao = false; 
   bool _existeProgramacao = false;
 
   String _subarea = "---";
@@ -534,11 +542,36 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
   List<Map<String, String>> _listaSemaforosDropdown = [];
   bool _carregandoSemaforos = true;
 
+  // --- PERMISSÕES DE PERFIL ---
+  bool _podeEditarTudo = false;
+
   @override
   void initState() {
     super.initState();
+    _verificarPerfilUsuario();
     _carregarSubareasBanco();
-    _carregarSemaforosBanco(); // Esta função agora lida com o semaforoInicial no final
+    _carregarSemaforosBanco(); 
+  }
+
+  Future<void> _verificarPerfilUsuario() async {
+    User? user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        DocumentSnapshot doc = await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
+        if (doc.exists && doc.data() != null) {
+          var d = doc.data() as Map<String, dynamic>;
+          String perfil = (d['perfil'] ?? '').toString().toLowerCase();
+          
+          if (perfil == 'admin' || perfil == 'administrador' || perfil == 'desenvolvedor') {
+            setState(() {
+              _podeEditarTudo = true;
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint('Erro ao buscar perfil: $e');
+      }
+    }
   }
 
   Color _obterCorDoPlano(String planId) {
@@ -611,7 +644,6 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
           _carregandoSemaforos = false; 
         });
 
-        // --- LÓGICA PARA AUTO-PREENCHER VINDO DO MAPA OU OCORRÊNCIAS ---
         if (widget.semaforoInicial != null && widget.semaforoInicial!.isNotEmpty) {
            try {
              var itemEncontrado = _listaSemaforosDropdown.firstWhere(
@@ -730,7 +762,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Excluir Plano', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-        content: const Text('Deseja realmente remover este plano da configuração?'),
+        content: const Text('Deseja realmente remover este plano da configuration?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar', style: TextStyle(color: Colors.black87))),
           ElevatedButton(
@@ -1826,7 +1858,9 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
           return d['nomeCompleto'].toString().toUpperCase();
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      debugPrint('Erro ao buscar nome: $e');
+    }
     return (user.displayName ?? user.email ?? 'SISTEMA').toUpperCase();
   }
 
@@ -1881,6 +1915,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // --- PAINEL DE CONFIGURAÇÃO TOPO ---
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: const Border(top: BorderSide(color: Colors.orange, width: 4)), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10)]),
@@ -2019,21 +2054,24 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                             Wrap(
                               spacing: 10, runSpacing: 10,
                               children: [
-                                if (!_existeProgramacao || _modoEdicao) ...[
+                                if (!_existeProgramacao && _podeEditarTudo) ...[
                                   _buildCustomButton('🚦 DEFINIR GRUPOS', Colors.orange, _abrirModalDefinirGrupos),
                                   _buildCustomButton('📝 DEFINIR PLANO', Colors.green, _abrirModalDefinirPlano),
                                   _buildCustomButton('📅 DEFINIR AGENDAMENTO', Colors.blue, _abrirModalAgendamento),
                                   _buildCustomButton('📝 OBSERVAÇÕES', Colors.purple, _abrirModalObservacoes),
                                   _buildCustomButton('💾 SALVAR PROGRAMAÇÃO', Colors.deepPurple, _iniciarSalvamentoComMotivo),
-                                ],
-                                if (_existeProgramacao && !_modoEdicao) ...[
-                                  _buildCustomButton('✏️ EDITAR PROGRAMAÇÃO', Colors.blueGrey, _alternarModoEdicao),
+                                ] else if (_existeProgramacao && _modoEdicao && _podeEditarTudo) ...[
+                                  _buildCustomButton('🚦 DEFINIR GRUPOS', Colors.orange, _abrirModalDefinirGrupos),
+                                  _buildCustomButton('📝 DEFINIR PLANO', Colors.green, _abrirModalDefinirPlano),
+                                  _buildCustomButton('📅 DEFINIR AGENDAMENTO', Colors.blue, _abrirModalAgendamento),
+                                  _buildCustomButton('📝 OBSERVAÇÕES', Colors.purple, _abrirModalObservacoes),
+                                  _buildCustomButton('💾 SALVAR PROGRAMAÇÃO', Colors.deepPurple, _iniciarSalvamentoComMotivo),
+                                  _buildCustomButton('🚫 CANCELAR EDIÇÃO', Colors.redAccent, _alternarModoEdicao),
+                                ] else if (_existeProgramacao && !_modoEdicao) ...[
+                                  if (_podeEditarTudo) _buildCustomButton('✏️ EDITAR PROGRAMAÇÃO', Colors.blueGrey, _alternarModoEdicao),
                                   _buildCustomButton('📄 EXPORTAR PDF', Colors.red, _exportarPdf),
                                   _buildCustomButton('📝 VER OBSERVAÇÕES', Colors.purple, _abrirModalObservacoes),
-                                  _buildCustomButton('🗑️ ZERAR TUDO', Colors.black87, _zerarTudo),
-                                ],
-                                if (_existeProgramacao && _modoEdicao) ...[
-                                  _buildCustomButton('🚫 CANCELAR EDIÇÃO', Colors.redAccent, _alternarModoEdicao),
+                                  if (_podeEditarTudo) _buildCustomButton('🗑️ ZERAR TUDO', Colors.black87, _zerarTudo),
                                 ],
                               ],
                             ),
@@ -2073,7 +2111,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
 
                                           return InkWell(
                                             onTap: () {
-                                              if (_modoEdicao) {
+                                              if (_modoEdicao && _podeEditarTudo) {
                                                 _editarAgendamentoExistente(dia, index, ev);
                                               }
                                             },
@@ -2106,6 +2144,7 @@ class _TelaProgramacaoState extends State<TelaProgramacao> {
                           plano: p,
                           gruposGlobais: _grupos,
                           modoEdicao: _modoEdicao,
+                          podeEditarTudo: _podeEditarTudo,
                           onUpdate: () => setState(() {}),
                           onDelete: () => _excluirPlano(index),
                           onEdit: () => _abrirModalRenomearPlano(p, index),

@@ -37,7 +37,7 @@ class SosApp extends StatelessWidget {
         ),
       ),
       // Aponta para a tela inicial do sistema
-      home: const TelaLogin(), 
+      home: const TelaPrincipal(), 
     );
   }
 }
