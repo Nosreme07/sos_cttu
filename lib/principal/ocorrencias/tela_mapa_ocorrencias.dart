@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -13,6 +15,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:share_plus/share_plus.dart';
 import '../programacao/tela_programacao.dart';
 
 import '../../widgets/menu_usuario.dart';
@@ -35,15 +38,14 @@ class TelaMapaOcorrencias extends StatefulWidget {
   State<TelaMapaOcorrencias> createState() => _TelaMapaOcorrenciasState();
 }
 
-// ADICIONADO O MIXIN PARA SUPORTE À ANIMAÇÃO
-class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTickerProviderStateMixin {
+class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
+    with SingleTickerProviderStateMixin {
   final MapController _mapController = MapController();
   final LatLng _centroPadrao = const LatLng(-8.047, -34.877);
   final ImagePicker _picker = ImagePicker();
-  
+
   final AudioPlayer _audioPlayer = AudioPlayer();
 
-  // VARIÁVEIS DE ANIMAÇÃO DO PINO DO MAPA
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
 
@@ -55,11 +57,12 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
   bool _fPrioBaixa = true;
   bool _fMais24h = false;
   bool _fForaPrazo = false;
+
   String _filtroEmpresa = 'TODAS';
+  List<String> _empresasOptions = ['TODAS'];
 
   bool _filtrosVisiveis = true;
 
-  List<String> _empresasOptions = ['TODAS'];
   Map<String, String> _mapaPrioridades = {};
   Map<String, LatLng> _mapaCoordenadasSemaforos = {};
 
@@ -84,8 +87,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
   @override
   void initState() {
     super.initState();
-    
-    // INICIALIZANDO A ANIMAÇÃO QUE FARÁ O PINO PISCAR/PULSAR
+
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
@@ -105,7 +107,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
 
   @override
   void dispose() {
-    _pulseController.dispose(); // LIMPANDO O CONTROLADOR DA ANIMAÇÃO
+    _pulseController.dispose();
     _audioPlayer.dispose();
     super.dispose();
   }
@@ -173,7 +175,9 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
     if (st.contains('atribu')) return Colors.deepPurpleAccent;
     if (st.contains('aberto') ||
         st.contains('pendente') ||
-        (st.contains('aguardando') && !st.contains('baixa'))) return Colors.redAccent;
+        (st.contains('aguardando') && !st.contains('baixa'))) {
+      return Colors.redAccent;
+    }
     if (st.contains('deslocamento')) return Colors.orange;
     if (st.contains('atendimento')) return Colors.green;
     if (st.contains('aguardando baixa')) return Colors.teal;
@@ -274,6 +278,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
 
       Map<String, LatLng> coords = {};
       List<Map<String, dynamic>> semaforosLocal = [];
+      Set<String> empresasSet = {'TODAS'};
+
       for (var doc in s.docs) {
         var d = doc.data() as Map<String, dynamic>? ?? {};
         String idSemaforo =
@@ -291,11 +297,17 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
         if (idSemaforo.isNotEmpty && latLng != null) {
           coords[idSemaforo] = latLng;
         }
+
+        String empresa = (d['empresa'] ?? '').toString().trim().toUpperCase();
+        if (empresa.isNotEmpty) {
+          empresasSet.add(empresa);
+        }
+
         semaforosLocal.add({
           'id': idSemaforo,
           'endereco': (d['endereco'] ?? '').toString(),
           'bairro': (d['bairro'] ?? '').toString(),
-          'empresa': (d['empresa'] ?? '').toString()
+          'empresa': empresa,
         });
       }
 
@@ -304,6 +316,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
               ((doc.data() as Map<String, dynamic>)['origem'] ?? '').toString())
           .where((origem) => origem.isNotEmpty)
           .toList();
+
       List<String> materiaisLocal = m.docs
           .map((doc) =>
               ((doc.data() as Map<String, dynamic>)['nome'] ??
@@ -322,6 +335,12 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
           (a, b) => a['falha'].toString().compareTo(b['falha'].toString()));
       materiaisLocal.sort();
 
+      List<String> empresasList = ['TODAS'];
+      List<String> restantes = empresasSet.toList()
+        ..remove('TODAS')
+        ..sort();
+      empresasList.addAll(restantes);
+
       if (mounted) {
         setState(() {
           _mapaPrioridades = prios;
@@ -336,6 +355,10 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
               falhasLocal.map((fal) => fal['falha'] as String).toSet().toList();
           _opcoesOrigens = origensLocal.toSet().toList();
           _opcoesMateriais = materiaisLocal.toSet().toList();
+          _empresasOptions = empresasList;
+          if (!_empresasOptions.contains(_filtroEmpresa)) {
+            _filtroEmpresa = 'TODAS';
+          }
         });
       }
     } catch (e) {
@@ -347,31 +370,32 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
     try {
       final codec = kIsWeb
           ? await ui.instantiateImageCodec(imageBytes)
-          : await ui.instantiateImageCodec(imageBytes, targetWidth: 800);
+          : await ui.instantiateImageCodec(imageBytes, targetWidth: 250);
       final frame = await codec.getNextFrame();
       final image = frame.image;
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
       canvas.drawImage(image, Offset.zero, Paint());
+
       final paintRect = Paint()..color = Colors.black54;
       canvas.drawRect(
-          Rect.fromLTWH(0, image.height.toDouble() - 60,
-              image.width.toDouble(), 60),
+          Rect.fromLTWH(0, image.height.toDouble() - 35,
+              image.width.toDouble(), 35),
           paintRect);
+
       final textStyle = ui.TextStyle(
-          color: Colors.yellowAccent, fontSize: 24, fontWeight: FontWeight.bold);
-      final paragraphStyle =
-          ui.ParagraphStyle(textAlign: TextAlign.right);
-      final paragraphBuilder =
-          ui.ParagraphBuilder(paragraphStyle)
-            ..pushStyle(textStyle)
-            ..addText(
-                'REGISTRO: ${DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now())}');
+          color: Colors.yellowAccent, fontSize: 11, fontWeight: FontWeight.bold);
+      final paragraphStyle = ui.ParagraphStyle(textAlign: TextAlign.right);
+      final paragraphBuilder = ui.ParagraphBuilder(paragraphStyle)
+        ..pushStyle(textStyle)
+        ..addText(
+            'REGISTRO: ${DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now())}');
       final paragraph = paragraphBuilder.build();
       paragraph.layout(
-          ui.ParagraphConstraints(width: image.width.toDouble() - 20));
+          ui.ParagraphConstraints(width: image.width.toDouble() - 10));
       canvas.drawParagraph(
-          paragraph, Offset(0, image.height.toDouble() - 45));
+          paragraph, Offset(0, image.height.toDouble() - 25));
+
       final picture = recorder.endRecording();
       final img = await picture.toImage(image.width, image.height);
       final pngBytes = await img.toByteData(format: ui.ImageByteFormat.png);
@@ -417,8 +441,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
       String placaDoc =
           (data['placa_veiculo'] ?? '').toString().toUpperCase().trim();
       String st = (data['status'] ?? '').toString().toLowerCase();
-      bool isConcluido =
-          st.contains('conclu') || st.contains('finaliz');
+      bool isConcluido = st.contains('conclu') || st.contains('finaliz');
       if (placaDoc != _placaEquipeLogada) return false;
       if (isConcluido) return false;
       return true;
@@ -430,7 +453,9 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
     bool statusOK = false;
     if (st.contains('deslocamento') && _fStatusDesloc) {
       statusOK = true;
-    } else if ((st.contains('atendimento') || st.contains('aguardando baixa')) && _fStatusAtend) {
+    } else if ((st.contains('atendimento') ||
+            st.contains('aguardando baixa')) &&
+        _fStatusAtend) {
       statusOK = true;
     } else if ((st.contains('aberto') ||
             st.contains('pendente') ||
@@ -453,8 +478,19 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
     }
     if (!prioOK) return false;
 
-    if (_filtroEmpresa != 'TODAS' &&
-        data['empresa_responsavel'] != _filtroEmpresa) return false;
+    if (_filtroEmpresa != 'TODAS') {
+      String empDoc =
+          (data['empresa_semaforo'] ?? '').toString().trim().toUpperCase();
+      if (empDoc.isEmpty) {
+        String numSemAux = _formatarId(data['semaforo']?.toString() ?? '');
+        var semInfo = _semaforosAux.firstWhere(
+            (s) => s['id'] == numSemAux,
+            orElse: () => <String, dynamic>{});
+        empDoc = (semInfo['empresa'] ?? '').toString().trim().toUpperCase();
+      }
+      if (empDoc != _filtroEmpresa) return false;
+    }
+
     if (_fMais24h && !_maisDe24h(data['data_de_abertura'])) return false;
     if (_fForaPrazo &&
         !_estaForaDoPrazo(data['data_de_abertura'], data['prazo'])) {
@@ -507,8 +543,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-                'A central acabou de atribuir um serviço para sua viatura.',
+            Text('A central acabou de atribuir um serviço para sua viatura.',
                 style:
                     TextStyle(color: Colors.purple.shade900, fontSize: 13)),
             const SizedBox(height: 16),
@@ -572,9 +607,60 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
     );
   }
 
+  Future<List<String>> _uploadFotos(
+      List<Uint8List> fotos, String docId, String prefixo) async {
+    List<String> urls = [];
+    for (int i = 0; i < fotos.length; i++) {
+      try {
+        final String timestamp =
+            DateTime.now().millisecondsSinceEpoch.toString();
+        final String nomeArquivo =
+            'ocorrencias/${docId}_${prefixo}_${timestamp}_$i.png';
+
+        final Reference ref =
+            FirebaseStorage.instance.ref().child(nomeArquivo);
+
+        final UploadTask task = ref.putData(
+          fotos[i],
+          SettableMetadata(
+            contentType: 'image/png',
+            customMetadata: {
+              'docId': docId,
+              'indice': '$i',
+              'prefixo': prefixo,
+            },
+          ),
+        );
+
+        final TaskSnapshot snapshot = await task;
+
+        if (snapshot.state == TaskState.success) {
+          final String url = await snapshot.ref.getDownloadURL();
+          urls.add(url);
+        } else {
+          debugPrint(
+              'Upload da foto $i não concluído. Estado: ${snapshot.state}');
+        }
+      } catch (e) {
+        debugPrint('Erro ao fazer upload da foto $i: $e');
+      }
+    }
+    return urls;
+  }
+
   void _abrirModalRelatoWhatsApp(String docId, Map<String, dynamic> data) {
-    final relatoCtrl = TextEditingController();
+    bool defeitoConstatado = true;
+    final relatoCtrl = TextEditingController(text: data['relato_equipe'] ?? '');
+    String falha = data['tipo_da_falha'] ?? '';
     bool estaSalvando = false;
+    bool estaArrastandoArea = false;
+
+    List<Uint8List> fotosSelecionadas = [];
+
+    if (falha.isNotEmpty && !_opcoesFalhas.contains(falha)) {
+      _opcoesFalhas.add(falha);
+    }
+    final falhaMenuCtrl = TextEditingController(text: falha);
 
     showModalBottomSheet(
       context: context,
@@ -589,88 +675,371 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
               left: 24,
               right: 24,
               bottom: MediaQuery.of(context).viewInsets.bottom + 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text('Concluir Serviço (Equipe)',
-                  style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.orange)),
-              const SizedBox(height: 10),
-              const Text(
-                  'Descreva o que foi feito. O WhatsApp será aberto para você enviar as fotos à central.',
-                  style: TextStyle(fontSize: 13, color: Colors.blueGrey)),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: relatoCtrl,
-                maxLines: 3,
-                textCapitalization: TextCapitalization.characters,
-                inputFormatters: [UpperCaseTextFormatter()],
-                decoration: const InputDecoration(
-                    labelText: 'Detalhes do Atendimento',
-                    border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    padding: const EdgeInsets.symmetric(vertical: 16)),
-                icon: const Icon(Icons.send, color: Colors.white),
-                label: estaSalvando
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text('Enviar para WhatsApp e Informar Central',
-                        style: TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.bold)),
-                onPressed: estaSalvando
-                    ? null
-                    : () async {
-                        if (relatoCtrl.text.isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Preencha os detalhes!')));
-                          return;
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Pré-Concluir Serviço (Equipe)',
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.orange)),
+                Container(
+                  margin: const EdgeInsets.symmetric(vertical: 10),
+                  padding: const EdgeInsets.all(10),
+                  color: Colors.blue.shade50,
+                  child: Text(
+                      'Falha Original: ${data['tipo_da_falha'] ?? '---'}\nDetalhes Iniciais: ${data['detalhes'] ?? '---'}',
+                      style: const TextStyle(fontSize: 12)),
+                ),
+                SwitchListTile(
+                  title: const Text('Foi constatado defeito?',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  value: defeitoConstatado,
+                  activeThumbColor: Colors.green,
+                  onChanged: (v) {
+                    setStateModal(() {
+                      defeitoConstatado = v;
+                      if (!defeitoConstatado) {
+                        relatoCtrl.text =
+                            'A EQUIPE RELATA QUE REALIZOU UMA VISTORIA COMPLETA E O SEMÁFORO NÃO APRESENTOU DEFEITO.';
+                      } else {
+                        relatoCtrl.text = data['relato_equipe'] ?? '';
+                      }
+                    });
+                  },
+                ),
+                if (defeitoConstatado) ...[
+                  DropdownMenu<String>(
+                    expandedInsets: EdgeInsets.zero,
+                    controller: falhaMenuCtrl,
+                    enableFilter: true,
+                    enableSearch: true,
+                    label: const Text('Falha Encontrada *'),
+                    inputDecorationTheme: const InputDecorationTheme(
+                        border: OutlineInputBorder(), isDense: true),
+                    initialSelection: falha.isEmpty ? null : falha,
+                    dropdownMenuEntries: _opcoesFalhas
+                        .map((f) => DropdownMenuEntry(value: f, label: f))
+                        .toList(),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: relatoCtrl,
+                  maxLines: 3,
+                  textCapitalization: TextCapitalization.characters,
+                  inputFormatters: [UpperCaseTextFormatter()],
+                  decoration: const InputDecoration(
+                      labelText: 'Ação Técnica / Detalhes do Atendimento *',
+                      border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 16),
+                const Text('Fotos do Serviço (Max: 4)',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                const SizedBox(height: 8),
+                if (fotosSelecionadas.isNotEmpty)
+                  SizedBox(
+                    height: 100,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: fotosSelecionadas.length,
+                      itemBuilder: (context, index) {
+                        return Stack(
+                          children: [
+                            Container(
+                              margin: const EdgeInsets.only(right: 8),
+                              width: 100,
+                              height: 100,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(8),
+                                border:
+                                    Border.all(color: Colors.grey.shade300),
+                                image: DecorationImage(
+                                    image:
+                                        MemoryImage(fotosSelecionadas[index]),
+                                    fit: BoxFit.cover),
+                              ),
+                            ),
+                            Positioned(
+                              top: 2,
+                              right: 10,
+                              child: GestureDetector(
+                                onTap: () => setStateModal(
+                                    () => fotosSelecionadas.removeAt(index)),
+                                child: const CircleAvatar(
+                                    radius: 12,
+                                    backgroundColor: Colors.red,
+                                    child: Icon(Icons.close,
+                                        size: 14, color: Colors.white)),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.camera_alt),
+                        label: const Text('Câmera'),
+                        onPressed: fotosSelecionadas.length >= 4
+                            ? null
+                            : () async {
+                                final XFile? foto = await _picker.pickImage(
+                                    source: ImageSource.camera,
+                                    imageQuality: 60);
+                                if (foto != null) {
+                                  Uint8List bytes = await foto.readAsBytes();
+                                  Uint8List carimbada =
+                                      await _adicionarCarimboNaFoto(bytes);
+                                  setStateModal(
+                                      () => fotosSelecionadas.add(carimbada));
+                                }
+                              },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.photo_library),
+                        label: const Text('Galeria / PC'),
+                        onPressed: fotosSelecionadas.length >= 4
+                            ? null
+                            : () async {
+                                final List<XFile> fotos =
+                                    await _picker.pickMultiImage(
+                                        imageQuality: 60);
+                                for (var foto in fotos) {
+                                  if (fotosSelecionadas.length >= 4) break;
+                                  Uint8List bytes = await foto.readAsBytes();
+                                  Uint8List carimbada =
+                                      await _adicionarCarimboNaFoto(bytes);
+                                  setStateModal(
+                                      () => fotosSelecionadas.add(carimbada));
+                                }
+                              },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                if (fotosSelecionadas.length < 4)
+                  DropTarget(
+                    onDragEntered: (detail) =>
+                        setStateModal(() => estaArrastandoArea = true),
+                    onDragExited: (detail) =>
+                        setStateModal(() => estaArrastandoArea = false),
+                    onDragDone: (detail) async {
+                      setStateModal(() => estaArrastandoArea = false);
+                      for (var file in detail.files) {
+                        if (fotosSelecionadas.length >= 4) break;
+                        if (file.mimeType?.startsWith('image/') ?? true) {
+                          Uint8List bytes = await file.readAsBytes();
+                          Uint8List carimbada =
+                              await _adicionarCarimboNaFoto(bytes);
+                          setStateModal(
+                              () => fotosSelecionadas.add(carimbada));
                         }
-
-                        setStateModal(() => estaSalvando = true);
-
-                        try {
-                          await FirebaseFirestore.instance
-                              .collection('Gerenciamento_ocorrencias')
-                              .doc(docId)
-                              .update({
-                            'status': 'Aguardando Baixa',
-                            'relato_equipe': relatoCtrl.text.toUpperCase(),
-                            'data_pre_conclusao': FieldValue.serverTimestamp(),
-                          });
-
-                          String numeroCentral = "5511999999999"; 
-                          String semaforoInfo = data['semaforo'] ?? 'Desconhecido';
-                          String mensagem = "🚨 *OCORRÊNCIA PRÉ-CONCLUÍDA*\n\n"
-                              "🚥 *Semáforo:* $semaforoInfo\n"
-                              "👷 *Equipe:* $_placaEquipeLogada\n"
-                              "📝 *Relato:* ${relatoCtrl.text.toUpperCase()}\n\n"
-                              "📸 _Segue as fotos do serviço abaixo:_";
-
-                          String urlWhatsApp =
-                              "whatsapp://send?phone=$numeroCentral&text=${Uri.encodeComponent(mensagem)}";
-
-                          if (await canLaunchUrl(Uri.parse(urlWhatsApp))) {
-                            await launchUrl(Uri.parse(urlWhatsApp), mode: LaunchMode.externalApplication);
-                          } else {
+                      }
+                    },
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () async {
+                          final List<XFile> fotos =
+                              await _picker.pickMultiImage(imageQuality: 60);
+                          for (var foto in fotos) {
+                            if (fotosSelecionadas.length >= 4) break;
+                            Uint8List bytes = await foto.readAsBytes();
+                            Uint8List carimbada =
+                                await _adicionarCarimboNaFoto(bytes);
+                            setStateModal(
+                                () => fotosSelecionadas.add(carimbada));
+                          }
+                        },
+                        child: Container(
+                          height: 90,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: estaArrastandoArea
+                                ? Colors.green.withValues(alpha: 0.1)
+                                : Colors.grey.shade50,
+                            border: Border.all(
+                                color: estaArrastandoArea
+                                    ? Colors.green
+                                    : Colors.grey.shade300,
+                                width: 2),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.cloud_upload,
+                                    color: estaArrastandoArea
+                                        ? Colors.green
+                                        : Colors.blueGrey,
+                                    size: 28),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Ou arraste as imagens e solte aqui\n(Clique para abrir a galeria)',
+                                  style: TextStyle(
+                                      color: estaArrastandoArea
+                                          ? Colors.green
+                                          : Colors.blueGrey,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      padding: const EdgeInsets.symmetric(vertical: 16)),
+                  icon: const Icon(Icons.share, color: Colors.white),
+                  label: estaSalvando
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
+                      : const Text('Pré-Concluir e Compartilhar',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold)),
+                  onPressed: estaSalvando
+                      ? null
+                      : () async {
+                          if (defeitoConstatado &&
+                              falhaMenuCtrl.text.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('WhatsApp não instalado.')));
+                                const SnackBar(
+                                    content: Text(
+                                        'Preencha a falha encontrada!')));
+                            return;
+                          }
+                          if (relatoCtrl.text.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'Descreva a ação realizada nos detalhes!')));
+                            return;
                           }
 
-                          if (context.mounted) Navigator.pop(context);
-                        } catch (e) {
-                          setStateModal(() => estaSalvando = false);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Erro ao enviar: $e')));
-                        }
-                      },
-              ),
-            ],
+                          setStateModal(() => estaSalvando = true);
+
+                          try {
+                            List<String> fotosSalvasUrls = [];
+                            if (fotosSelecionadas.isNotEmpty) {
+                              fotosSalvasUrls = await _uploadFotos(
+                                  fotosSelecionadas, docId, 'pre');
+                            }
+
+                            Map<String, dynamic> updateData = {
+                              'status': 'Aguardando Baixa',
+                              'falha_aparente_final': defeitoConstatado
+                                  ? falhaMenuCtrl.text
+                                  : 'DEFEITO NÃO CONSTATADO',
+                              'relato_equipe':
+                                  relatoCtrl.text.toUpperCase(),
+                              'data_pre_conclusao':
+                                  FieldValue.serverTimestamp(),
+                            };
+
+                            if (fotosSalvasUrls.isNotEmpty) {
+                              updateData['fotos_finalizacao'] =
+                                  fotosSalvasUrls;
+                            }
+
+                            await FirebaseFirestore.instance
+                                .collection('Gerenciamento_ocorrencias')
+                                .doc(docId)
+                                .update(updateData);
+
+                            String semaforoInfo = _formatarId(
+                                data['semaforo']?.toString() ?? '');
+                            String equipeNomes = data[
+                                    'integrantes_equipe'] ??
+                                data['equipe_atrelada'] ??
+                                data['equipe_responsavel'] ??
+                                'NÃO INFORMADA';
+                            String defeitoRelatado =
+                                data['tipo_da_falha'] ?? 'NÃO INFORMADO';
+                            String defeitoTexto = defeitoConstatado
+                                ? falhaMenuCtrl.text
+                                : 'DEFEITO NÃO CONSTATADO';
+
+                            String mensagem =
+                                "🚨 *OCORRÊNCIA PRÉ-CONCLUÍDA*\n\n"
+                                "🚥 *Semáforo:* $semaforoInfo\n"
+                                "👷 *Equipe:* $equipeNomes\n"
+                                "🔍 *defeito relatado:* $defeitoRelatado\n"
+                                "🔍 *Defeito Constatado:* $defeitoTexto\n"
+                                "📝 *Relato:* ${relatoCtrl.text.toUpperCase()}\n\n"
+                                "📸 _As fotos foram anexadas no sistema SOS._";
+
+                            List<XFile> arquivosParaCompartilhar = [];
+                            if (kIsWeb) {
+                              for (int i = 0;
+                                  i < fotosSelecionadas.length;
+                                  i++) {
+                                arquivosParaCompartilhar.add(XFile.fromData(
+                                    fotosSelecionadas[i],
+                                    mimeType: 'image/png',
+                                    name: 'foto_${docId}_$i.png'));
+                              }
+                            } else {
+                              final tempDir = Directory.systemTemp;
+                              for (int i = 0;
+                                  i < fotosSelecionadas.length;
+                                  i++) {
+                                final file = File(
+                                    '${tempDir.path}/foto_${docId}_${DateTime.now().millisecondsSinceEpoch}_$i.png');
+                                await file.writeAsBytes(
+                                    fotosSelecionadas[i],
+                                    flush: true);
+                                arquivosParaCompartilhar
+                                    .add(XFile(file.path));
+                              }
+                            }
+
+                            if (context.mounted) Navigator.pop(context);
+
+                            if (arquivosParaCompartilhar.isNotEmpty) {
+                              await Share.shareXFiles(
+                                  arquivosParaCompartilhar,
+                                  text: mensagem);
+                            } else {
+                              await Share.share(mensagem);
+                            }
+                          } catch (e) {
+                            setStateModal(() => estaSalvando = false);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                      content: Text('Erro ao enviar: $e'),
+                                      backgroundColor: Colors.red));
+                            }
+                          }
+                        },
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -688,8 +1057,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
 
     String semaforoDropdownValue = '';
     if (semaforoSel.isNotEmpty) {
-      int idx = _opcoesSemaforos
-          .indexWhere((e) => e.startsWith(semaforoSel));
+      int idx = _opcoesSemaforos.indexWhere((e) => e.startsWith(semaforoSel));
       if (idx != -1) {
         semaforoDropdownValue = _opcoesSemaforos[idx];
       } else {
@@ -757,12 +1125,10 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                     semaforoSel = selection;
                     semaforoMenuCtrl.text = selection;
                   },
-                  fieldViewBuilder:
-                      (context, textEditingController, focusNode,
-                          onFieldSubmitted) {
+                  fieldViewBuilder: (context, textEditingController, focusNode,
+                      onFieldSubmitted) {
                     textEditingController.addListener(() {
-                      semaforoMenuCtrl.text =
-                          textEditingController.text;
+                      semaforoMenuCtrl.text = textEditingController.text;
                       semaforoSel = textEditingController.text;
                     });
                     return TextField(
@@ -794,8 +1160,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                             padding: EdgeInsets.zero,
                             shrinkWrap: true,
                             itemCount: options.length,
-                            itemBuilder:
-                                (BuildContext context, int index) {
+                            itemBuilder: (BuildContext context, int index) {
                               final String option =
                                   options.elementAt(index);
                               return InkWell(
@@ -823,8 +1188,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                       border: OutlineInputBorder(), isDense: true),
                   initialSelection: falhaSel.isEmpty ? null : falhaSel,
                   dropdownMenuEntries: _opcoesFalhas
-                      .map((f) =>
-                          DropdownMenuEntry(value: f, label: f))
+                      .map((f) => DropdownMenuEntry(value: f, label: f))
                       .toList(),
                   onSelected: (val) => falhaSel = val ?? '',
                 ),
@@ -837,11 +1201,9 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                   label: const Text('Origem *'),
                   inputDecorationTheme: const InputDecorationTheme(
                       border: OutlineInputBorder(), isDense: true),
-                  initialSelection:
-                      origemSel.isEmpty ? null : origemSel,
+                  initialSelection: origemSel.isEmpty ? null : origemSel,
                   dropdownMenuEntries: _opcoesOrigens
-                      .map((o) =>
-                          DropdownMenuEntry(value: o, label: o))
+                      .map((o) => DropdownMenuEntry(value: o, label: o))
                       .toList(),
                   onSelected: (val) => origemSel = val ?? '',
                 ),
@@ -873,8 +1235,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                             return;
                           }
                           if (falhaMenuCtrl.text.isEmpty ||
-                              !_opcoesFalhas
-                                  .contains(falhaMenuCtrl.text)) {
+                              !_opcoesFalhas.contains(falhaMenuCtrl.text)) {
                             ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                     content: Text(
@@ -882,8 +1243,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                             return;
                           }
                           if (origemMenuCtrl.text.isEmpty ||
-                              !_opcoesOrigens
-                                  .contains(origemMenuCtrl.text)) {
+                              !_opcoesOrigens.contains(origemMenuCtrl.text)) {
                             ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                     content: Text(
@@ -901,8 +1261,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
 
                               QuerySnapshot duplicatas =
                                   await FirebaseFirestore.instance
-                                      .collection(
-                                          'Gerenciamento_ocorrencias')
+                                      .collection('Gerenciamento_ocorrencias')
                                       .where('semaforo',
                                           isEqualTo: semaforoFinal)
                                       .where('tipo_da_falha',
@@ -911,16 +1270,15 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
 
                               bool existeAtiva =
                                   duplicatas.docs.any((docSnap) {
-                                if (docId != null &&
-                                    docSnap.id == docId) return false;
-                                String statusStr =
-                                    (docSnap.data() as Map<String,
-                                            dynamic>)['status']
+                                if (docId != null && docSnap.id == docId) {
+                                  return false;
+                                }
+                                String statusStr = (docSnap.data()
+                                            as Map<String, dynamic>)['status']
                                         ?.toString()
                                         .toLowerCase() ??
                                     '';
-                                return !statusStr
-                                        .contains('finaliz') &&
+                                return !statusStr.contains('finaliz') &&
                                     !statusStr.contains('conclu');
                               });
 
@@ -931,14 +1289,12 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                     content: Text(
                                         'Já existe uma ocorrência EM ANDAMENTO com esta mesma falha para este semáforo!',
                                         style: TextStyle(
-                                            fontWeight:
-                                                FontWeight.bold)),
+                                            fontWeight: FontWeight.bold)),
                                     backgroundColor: Colors.red,
                                     duration: Duration(seconds: 4),
                                   ));
                                 }
-                                setStateModal(
-                                    () => estaSalvando = false);
+                                setStateModal(() => estaSalvando = false);
                                 return;
                               }
 
@@ -949,15 +1305,14 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                   (f) => f['falha'] == falhaFinal,
                                   orElse: () => <String, dynamic>{});
 
-                              String nomeUsuario =
-                                  await _getNomeUsuario();
+                              String nomeUsuario = await _getNomeUsuario();
 
                               Map<String, dynamic> payload = {
                                 'semaforo': semaforoFinal,
                                 'tipo_da_falha': falhaFinal,
                                 'origem_da_ocorrencia': origemFinal,
-                                'detalhes': detalhesCtrl.text
-                                    .toUpperCase(),
+                                'detalhes':
+                                    detalhesCtrl.text.toUpperCase(),
                                 'data_atualizacao':
                                     FieldValue.serverTimestamp(),
                                 'empresa_semaforo':
@@ -975,18 +1330,14 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                     FieldValue.serverTimestamp();
                                 payload['endereco'] =
                                     semInfo['endereco'] ?? '';
-                                payload['bairro'] =
-                                    semInfo['bairro'] ?? '';
-                                payload['usuario_abertura'] =
-                                    nomeUsuario;
+                                payload['bairro'] = semInfo['bairro'] ?? '';
+                                payload['usuario_abertura'] = nomeUsuario;
                                 await FirebaseFirestore.instance
-                                    .collection(
-                                        'Gerenciamento_ocorrencias')
+                                    .collection('Gerenciamento_ocorrencias')
                                     .add(payload);
                               } else {
                                 await FirebaseFirestore.instance
-                                    .collection(
-                                        'Gerenciamento_ocorrencias')
+                                    .collection('Gerenciamento_ocorrencias')
                                     .doc(docId)
                                     .update(payload);
                               }
@@ -995,15 +1346,14 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                               }
                             } catch (e) {
                               if (context.mounted) {
-                                ScaffoldMessenger.of(context)
-                                    .showSnackBar(SnackBar(
-                                        content: Text(
-                                            'Erro ao salvar: $e')));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                        content:
+                                            Text('Erro ao salvar: $e')));
                               }
                             } finally {
                               if (mounted) {
-                                setStateModal(
-                                    () => estaSalvando = false);
+                                setStateModal(() => estaSalvando = false);
                               }
                             }
                           }
@@ -1027,13 +1377,251 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // ALTERADO: Abre foto em tela cheia para visualização detalhada pela central
+  // ─────────────────────────────────────────────────────────────────────────
+  void _abrirFotoTelaCheia(BuildContext context, List<dynamic> fotos, int indiceInicial) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (ctx) {
+        int indiceAtual = indiceInicial;
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            String fotoStr = fotos[indiceAtual].toString();
+            Widget imagemWidget = fotoStr.startsWith('http')
+                ? Image.network(fotoStr, fit: BoxFit.contain)
+                : Image.memory(base64Decode(fotoStr), fit: BoxFit.contain);
+
+            return Dialog(
+              backgroundColor: Colors.black,
+              insetPadding: const EdgeInsets.all(8),
+              child: Stack(
+                children: [
+                  // Imagem com scroll/zoom
+                  InteractiveViewer(
+                    minScale: 0.5,
+                    maxScale: 5.0,
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: MediaQuery.of(ctx).size.height * 0.85,
+                      child: imagemWidget,
+                    ),
+                  ),
+                  // Contador e botão fechar
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            '${indiceAtual + 1} / ${fotos.length}',
+                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () => Navigator.pop(ctx),
+                          child: const CircleAvatar(
+                            radius: 16,
+                            backgroundColor: Colors.red,
+                            child: Icon(Icons.close, size: 18, color: Colors.white),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Seta anterior
+                  if (indiceAtual > 0)
+                    Positioned(
+                      left: 4,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: GestureDetector(
+                          onTap: () => setDialogState(() => indiceAtual--),
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              color: Colors.black45,
+                              shape: BoxShape.circle,
+                            ),
+                            padding: const EdgeInsets.all(8),
+                            child: const Icon(Icons.chevron_left, color: Colors.white, size: 32),
+                          ),
+                        ),
+                      ),
+                    ),
+                  // Seta próxima
+                  if (indiceAtual < fotos.length - 1)
+                    Positioned(
+                      right: 4,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: GestureDetector(
+                          onTap: () => setDialogState(() => indiceAtual++),
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              color: Colors.black45,
+                              shape: BoxShape.circle,
+                            ),
+                            padding: const EdgeInsets.all(8),
+                            child: const Icon(Icons.chevron_right, color: Colors.white, size: 32),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ALTERADO: Seção de fotos da equipe destacada com aviso e miniaturas clicáveis
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildFotosEquipe(BuildContext context, Map<String, dynamic> dados) {
+    final List<dynamic> fotos = dados['fotos_finalizacao'] as List? ?? [];
+    if (fotos.isEmpty) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.orange.shade50,
+          border: Border.all(color: Colors.orange.shade300),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'A equipe não anexou fotos nesta ocorrência.',
+                style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Banner de aviso destacado
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.teal.shade700, Colors.teal.shade400],
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.photo_camera, color: Colors.white, size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '📸 FOTOS ENVIADAS PELA EQUIPE',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          letterSpacing: 0.5),
+                    ),
+                    Text(
+                      '${fotos.length} foto(s) — toque para ampliar',
+                      style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Grade de miniaturas clicáveis
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: fotos.asMap().entries.map((entry) {
+            int idx = entry.key;
+            String fotoStr = entry.value.toString();
+            Widget thumb;
+            try {
+              thumb = fotoStr.startsWith('http')
+                  ? Image.network(fotoStr, width: 90, height: 90, fit: BoxFit.cover)
+                  : Image.memory(base64Decode(fotoStr), width: 90, height: 90, fit: BoxFit.cover);
+            } catch (_) {
+              thumb = Container(
+                width: 90,
+                height: 90,
+                color: Colors.grey.shade200,
+                child: const Icon(Icons.broken_image, color: Colors.grey),
+              );
+            }
+
+            return GestureDetector(
+              onTap: () => _abrirFotoTelaCheia(context, fotos, idx),
+              child: Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: thumb,
+                  ),
+                  // Ícone de zoom sobre a miniatura
+                  Positioned(
+                    bottom: 4,
+                    right: 4,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Icon(Icons.zoom_in, color: Colors.white, size: 14),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
   void _abrirModalFinalizar(String docId, Map<String, dynamic> dados) {
     bool defeitoConstatado = true;
-    bool estaSalvando = false;
-    bool estaArrastandoArea = false;
+    if (dados['falha_aparente_final'] == 'DEFEITO NÃO CONSTATADO') {
+      defeitoConstatado = false;
+    }
 
-    String falha = dados['tipo_da_falha'] ?? '';
-    final acaoCtrl = TextEditingController(text: dados['relato_equipe'] ?? '');
+    bool estaSalvando = false;
+
+    String falha = dados['falha_aparente_final'] ?? dados['tipo_da_falha'] ?? '';
+    if (falha == 'DEFEITO NÃO CONSTATADO') {
+      falha = dados['tipo_da_falha'] ?? '';
+    }
+
+    final acaoCtrl =
+        TextEditingController(text: dados['relato_equipe'] ?? '');
 
     List<Map<String, dynamic>> materiaisUsados = [];
     final materialCtrl = TextEditingController();
@@ -1064,19 +1652,29 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // ── Cabeçalho ──
                 const Text('Finalizar Ocorrência (Central)',
                     style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                         color: Colors.green)),
+
+                // ── Resumo dos dados iniciais ──
                 Container(
                   margin: const EdgeInsets.symmetric(vertical: 10),
                   padding: const EdgeInsets.all(10),
                   color: Colors.blue.shade50,
                   child: Text(
-                      'Falha Original: ${dados['tipo_da_falha'] ?? '---'}\nDetalhes Iniciais: ${dados['detalhes'] ?? '---'}\n\nRelato da Equipe: ${dados['relato_equipe'] ?? 'Nenhum relato'}',
+                      'Falha Original: ${dados['tipo_da_falha'] ?? '---'}\n'
+                      'Detalhes Iniciais: ${dados['detalhes'] ?? '---'}\n\n'
+                      'Relato da Equipe: ${dados['relato_equipe'] ?? 'Nenhum relato'}',
                       style: const TextStyle(fontSize: 12)),
                 ),
+
+                // ── ALTERADO: Seção de fotos da equipe destacada ──
+                _buildFotosEquipe(context, dados),
+
+                // ── Switch defeito ──
                 SwitchListTile(
                   title: const Text('Foi constatado defeito?',
                       style: TextStyle(fontWeight: FontWeight.bold)),
@@ -1106,8 +1704,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                         border: OutlineInputBorder(), isDense: true),
                     initialSelection: falha.isEmpty ? null : falha,
                     dropdownMenuEntries: _opcoesFalhas
-                        .map((f) =>
-                            DropdownMenuEntry(value: f, label: f))
+                        .map((f) => DropdownMenuEntry(value: f, label: f))
                         .toList(),
                   ),
                   const SizedBox(height: 10),
@@ -1140,10 +1737,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                           enableFilter: true,
                           enableSearch: true,
                           label: const Text('Buscar Material'),
-                          inputDecorationTheme:
-                              const InputDecorationTheme(
-                                  border: OutlineInputBorder(),
-                                  isDense: true),
+                          inputDecorationTheme: const InputDecorationTheme(
+                              border: OutlineInputBorder(), isDense: true),
                           dropdownMenuEntries: _opcoesMateriais
                               .map((m) =>
                                   DropdownMenuEntry(value: m, label: m))
@@ -1166,15 +1761,15 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.blue,
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 16)),
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 16)),
                         onPressed: () {
                           if (materialCtrl.text.isNotEmpty &&
                               qtdCtrl.text.isNotEmpty) {
                             setStateModal(() {
                               materiaisUsados.add({
-                                'material': materialCtrl.text
-                                    .toUpperCase(),
+                                'material':
+                                    materialCtrl.text.toUpperCase(),
                                 'quantidade': qtdCtrl.text
                               });
                               materialCtrl.clear();
@@ -1196,12 +1791,10 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                          border:
-                              Border.all(color: Colors.grey.shade300),
+                          border: Border.all(color: Colors.grey.shade300),
                           borderRadius: BorderRadius.circular(8)),
                       child: Column(
-                        children:
-                            materiaisUsados.asMap().entries.map((e) {
+                        children: materiaisUsados.asMap().entries.map((e) {
                           int idx = e.key;
                           Map mat = e.value;
                           return Row(
@@ -1213,8 +1806,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                       '${mat['quantidade']}x - ${mat['material']}',
                                       style: const TextStyle(
                                           fontSize: 12,
-                                          fontWeight:
-                                              FontWeight.bold))),
+                                          fontWeight: FontWeight.bold))),
                               InkWell(
                                 onTap: () => setStateModal(
                                     () => materiaisUsados.removeAt(idx)),
@@ -1229,7 +1821,9 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                   ],
                   const SizedBox(height: 16),
                 ],
-                const Text('Fotos do Serviço (Max: 4)',
+
+                // ── Fotos adicionais pela central ──
+                const Text('Adicionar NOVAS fotos (Central)',
                     style: TextStyle(
                         fontWeight: FontWeight.bold,
                         color: Colors.blueGrey)),
@@ -1249,11 +1843,11 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                               height: 100,
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                    color: Colors.grey.shade300),
+                                border:
+                                    Border.all(color: Colors.grey.shade300),
                                 image: DecorationImage(
-                                    image: MemoryImage(
-                                        fotosSelecionadas[index]),
+                                    image:
+                                        MemoryImage(fotosSelecionadas[index]),
                                     fit: BoxFit.cover),
                               ),
                             ),
@@ -1261,8 +1855,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                               top: 2,
                               right: 10,
                               child: GestureDetector(
-                                onTap: () => setStateModal(() =>
-                                    fotosSelecionadas.removeAt(index)),
+                                onTap: () => setStateModal(
+                                    () => fotosSelecionadas.removeAt(index)),
                                 child: const CircleAvatar(
                                     radius: 12,
                                     backgroundColor: Colors.red,
@@ -1285,17 +1879,15 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                         onPressed: fotosSelecionadas.length >= 4
                             ? null
                             : () async {
-                                final XFile? foto = await _picker
-                                    .pickImage(
-                                        source: ImageSource.camera);
+                                final XFile? foto = await _picker.pickImage(
+                                    source: ImageSource.camera,
+                                    imageQuality: 60);
                                 if (foto != null) {
-                                  Uint8List bytes =
-                                      await foto.readAsBytes();
+                                  Uint8List bytes = await foto.readAsBytes();
                                   Uint8List carimbada =
-                                      await _adicionarCarimboNaFoto(
-                                          bytes);
-                                  setStateModal(() =>
-                                      fotosSelecionadas.add(carimbada));
+                                      await _adicionarCarimboNaFoto(bytes);
+                                  setStateModal(
+                                      () => fotosSelecionadas.add(carimbada));
                                 }
                               },
                       ),
@@ -1309,109 +1901,28 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                             ? null
                             : () async {
                                 final List<XFile> fotos =
-                                    await _picker.pickMultiImage();
+                                    await _picker.pickMultiImage(
+                                        imageQuality: 60);
                                 for (var foto in fotos) {
-                                  if (fotosSelecionadas.length >= 4) {
-                                    break;
-                                  }
-                                  Uint8List bytes =
-                                      await foto.readAsBytes();
+                                  if (fotosSelecionadas.length >= 4) break;
+                                  Uint8List bytes = await foto.readAsBytes();
                                   Uint8List carimbada =
-                                      await _adicionarCarimboNaFoto(
-                                          bytes);
-                                  setStateModal(() =>
-                                      fotosSelecionadas.add(carimbada));
+                                      await _adicionarCarimboNaFoto(bytes);
+                                  setStateModal(
+                                      () => fotosSelecionadas.add(carimbada));
                                 }
                               },
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                if (fotosSelecionadas.length < 4)
-                  DropTarget(
-                    onDragEntered: (detail) =>
-                        setStateModal(() => estaArrastandoArea = true),
-                    onDragExited: (detail) =>
-                        setStateModal(() => estaArrastandoArea = false),
-                    onDragDone: (detail) async {
-                      setStateModal(() => estaArrastandoArea = false);
-                      for (var file in detail.files) {
-                        if (fotosSelecionadas.length >= 4) break;
-                        if (file.mimeType?.startsWith('image/') ??
-                            true) {
-                          Uint8List bytes = await file.readAsBytes();
-                          Uint8List carimbada =
-                              await _adicionarCarimboNaFoto(bytes);
-                          setStateModal(() =>
-                              fotosSelecionadas.add(carimbada));
-                        }
-                      }
-                    },
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () async {
-                          final List<XFile> fotos =
-                              await _picker.pickMultiImage();
-                          for (var foto in fotos) {
-                            if (fotosSelecionadas.length >= 4) break;
-                            Uint8List bytes = await foto.readAsBytes();
-                            Uint8List carimbada =
-                                await _adicionarCarimboNaFoto(bytes);
-                            setStateModal(() =>
-                                fotosSelecionadas.add(carimbada));
-                          }
-                        },
-                        child: Container(
-                          height: 90,
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            color: estaArrastandoArea
-                                ? Colors.green.withValues(alpha: 0.1)
-                                : Colors.grey.shade50,
-                            border: Border.all(
-                                color: estaArrastandoArea
-                                    ? Colors.green
-                                    : Colors.grey.shade300,
-                                width: 2),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Center(
-                            child: Column(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.cloud_upload,
-                                    color: estaArrastandoArea
-                                        ? Colors.green
-                                        : Colors.blueGrey,
-                                    size: 28),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Ou arraste as imagens e solte aqui\n(Clique para abrir a galeria)',
-                                  style: TextStyle(
-                                      color: estaArrastandoArea
-                                          ? Colors.green
-                                          : Colors.blueGrey,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
                 const SizedBox(height: 16),
+
+                // ── Botão finalizar ──
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
-                      padding:
-                          const EdgeInsets.symmetric(vertical: 16)),
+                      padding: const EdgeInsets.symmetric(vertical: 16)),
                   onPressed: estaSalvando
                       ? null
                       : () async {
@@ -1434,32 +1945,44 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                           setStateModal(() => estaSalvando = true);
 
                           try {
-                            List<String> fotosBase64 = [];
-                            for (Uint8List fotoBytes
-                                in fotosSelecionadas) {
-                              fotosBase64.add(base64Encode(fotoBytes));
+                            List<String> novasFotosUrls = [];
+                            if (fotosSelecionadas.isNotEmpty) {
+                              novasFotosUrls = await _uploadFotos(
+                                  fotosSelecionadas, docId, 'fim');
                             }
 
-                            String nomeUsuario =
-                                await _getNomeUsuario();
+                            String nomeUsuario = await _getNomeUsuario();
 
-                            await FirebaseFirestore.instance
-                                .collection(
-                                    'Gerenciamento_ocorrencias')
-                                .doc(docId)
-                                .update({
+                            Map<String, dynamic> payload = {
                               'status': 'Finalizado',
                               'data_de_finalizacao':
                                   FieldValue.serverTimestamp(),
                               'falha_aparente_final': defeitoConstatado
                                   ? falhaMenuCtrl.text
                                   : 'DEFEITO NÃO CONSTATADO',
-                              'acao_equipe':
-                                  acaoCtrl.text.toUpperCase(),
+                              'acao_equipe': acaoCtrl.text.toUpperCase(),
                               'materiais_utilizados': materiaisUsados,
-                              'fotos_finalizacao': fotosBase64,
                               'usuario_finalizacao': nomeUsuario,
-                            });
+                            };
+
+                            // ── Mescla fotos da equipe + novas da central ──
+                            List<dynamic> fotosFinais = [];
+                            if (dados['fotos_finalizacao'] != null) {
+                              fotosFinais
+                                  .addAll(dados['fotos_finalizacao']);
+                            }
+                            if (novasFotosUrls.isNotEmpty) {
+                              fotosFinais.addAll(novasFotosUrls);
+                            }
+
+                            if (fotosFinais.isNotEmpty) {
+                              payload['fotos_finalizacao'] = fotosFinais;
+                            }
+
+                            await FirebaseFirestore.instance
+                                .collection('Gerenciamento_ocorrencias')
+                                .doc(docId)
+                                .update(payload);
 
                             if (context.mounted) {
                               Navigator.pop(context);
@@ -1467,16 +1990,16 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                             if (mounted) {
                               ScaffoldMessenger.of(context)
                                   .showSnackBar(const SnackBar(
-                                      content:
-                                          Text('Atendimento concluído e Baixa Efetuada!'),
+                                      content: Text(
+                                          'Atendimento concluído e Baixa Efetuada!'),
                                       backgroundColor: Colors.green));
                             }
                           } catch (e) {
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                      content: Text(
-                                          'Erro ao salvar: $e')));
+                                      content:
+                                          Text('Erro ao salvar: $e')));
                             }
                             setStateModal(() => estaSalvando = false);
                           }
@@ -1546,8 +2069,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                           style: const TextStyle(
                               fontWeight: FontWeight.bold)),
                       subtitle: Text(ints,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
                       trailing: const Icon(Icons.check_circle_outline,
                           color: Colors.green),
                       onTap: () async {
@@ -1587,8 +2109,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
               onPressed: () => Navigator.pop(context, false),
               child: const Text('Cancelar')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: Colors.orange),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Confirmar',
                 style: TextStyle(color: Colors.white)),
@@ -1616,10 +2138,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
 
     String empresa = (data['empresa_semaforo'] ?? '').toString();
     if (empresa.isEmpty) {
-      String numSemAux =
-          _formatarId(data['semaforo']?.toString() ?? '');
-      var semInfo = _semaforosAux.firstWhere(
-          (s) => s['id'] == numSemAux,
+      String numSemAux = _formatarId(data['semaforo']?.toString() ?? '');
+      var semInfo = _semaforosAux.firstWhere((s) => s['id'] == numSemAux,
           orElse: () => <String, dynamic>{});
       empresa = (semInfo['empresa'] ?? '---').toString();
     }
@@ -1642,8 +2162,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
       builder: (context) => Container(
         decoration: const BoxDecoration(
           color: Colors.white,
-          borderRadius:
-              BorderRadius.vertical(top: Radius.circular(20)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -1661,8 +2180,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                 ),
                 Container(
                   margin: const EdgeInsets.only(left: 8),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                       color: corBase,
                       borderRadius: BorderRadius.circular(4)),
@@ -1680,38 +2199,43 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
               ],
             ),
             const Divider(),
-            _buildInfoRow(
-                'Nº da ocorrência', data['numero_da_ocorrencia']),
+            _buildInfoRow('Nº da ocorrência', data['numero_da_ocorrencia']),
             _buildInfoRow('Falha', data['tipo_da_falha']),
             _buildInfoRow('Detalhes', data['detalhes']),
             _buildInfoRow('Prazo Limite',
                 _calcularPrazo(data['data_de_abertura'], data['prazo'])),
             _buildInfoRow('Equipe atrelada',
-                data['equipe_atrelada'] ?? data['equipe_responsavel'] ?? 'Nenhuma'),
+                data['equipe_atrelada'] ??
+                    data['equipe_responsavel'] ??
+                    'Nenhuma'),
             const SizedBox(height: 15),
-            
-            // CONDIÇÕES PARA OS BOTÕES (DIFERENÇA EQUIPE x CENTRAL)
             if (!isEquipeLogada || ehDessaEquipe) ...[
               if (st.contains('atendimento')) ...[
                 if (isEquipeLogada)
                   ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange),
                     onPressed: () {
                       Navigator.pop(context);
                       _abrirModalRelatoWhatsApp(docId, data);
                     },
-                    child: const Text('Pré-Concluir e Abrir WhatsApp',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    child: const Text('Pré-Concluir e Compartilhar',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold)),
                   )
                 else
                   ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green),
                     onPressed: () {
                       Navigator.pop(context);
                       _abrirModalFinalizar(docId, data);
                     },
                     child: const Text('Finalizar Atendimento (Central)',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold)),
                   ),
                 const SizedBox(height: 8),
                 if (!isEquipeLogada)
@@ -1720,17 +2244,22 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                       Navigator.pop(context);
                       _atribuirEquipe(docId);
                     },
-                    child: const Text('Trocar Equipe', style: TextStyle(color: Colors.black87)),
+                    child: const Text('Trocar Equipe',
+                        style: TextStyle(color: Colors.black87)),
                   ),
-              ] else if (st.contains('aguardando baixa') && !isEquipeLogada) ...[
+              ] else if (st.contains('aguardando baixa') &&
+                  !isEquipeLogada) ...[
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+                  style:
+                      ElevatedButton.styleFrom(backgroundColor: Colors.teal),
                   onPressed: () {
                     Navigator.pop(context);
                     _abrirModalFinalizar(docId, data);
                   },
                   child: const Text('Validar e Dar Baixa Definitiva',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold)),
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton(
@@ -1738,7 +2267,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                     Navigator.pop(context);
                     _atribuirEquipe(docId);
                   },
-                  child: const Text('Trocar Equipe', style: TextStyle(color: Colors.black87)),
+                  child: const Text('Trocar Equipe',
+                      style: TextStyle(color: Colors.black87)),
                 ),
               ] else if (st.contains('deslocamento')) ...[
                 ElevatedButton(
@@ -1792,8 +2322,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                   ),
               ] else if (!isEquipeLogada) ...[
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue),
+                  style:
+                      ElevatedButton.styleFrom(backgroundColor: Colors.blue),
                   onPressed: () {
                     Navigator.pop(context);
                     _atribuirEquipe(docId);
@@ -1817,13 +2347,12 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 TextButton.icon(
-                  icon:
-                      const Icon(Icons.history, color: Colors.blueGrey),
+                  icon: const Icon(Icons.history, color: Colors.blueGrey),
                   label: const Text('Histórico',
                       style: TextStyle(color: Colors.blueGrey)),
                   onPressed: () {
-                    String numSem = _formatarId(
-                        data['semaforo']?.toString() ?? '');
+                    String numSem =
+                        _formatarId(data['semaforo']?.toString() ?? '');
                     var hist = _todasOcorrencias.where((oc) {
                       var d = oc.data() as Map<String, dynamic>;
                       return _formatarId(
@@ -1834,12 +2363,10 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                       var dA = a.data() as Map<String, dynamic>;
                       var dB = b.data() as Map<String, dynamic>;
                       DateTime dtA = dA['data_de_abertura'] != null
-                          ? (dA['data_de_abertura'] as Timestamp)
-                              .toDate()
+                          ? (dA['data_de_abertura'] as Timestamp).toDate()
                           : DateTime.fromMillisecondsSinceEpoch(0);
                       DateTime dtB = dB['data_de_abertura'] != null
-                          ? (dB['data_de_abertura'] as Timestamp)
-                              .toDate()
+                          ? (dB['data_de_abertura'] as Timestamp).toDate()
                           : DateTime.fromMillisecondsSinceEpoch(0);
                       return dtB.compareTo(dtA);
                     });
@@ -1857,15 +2384,14 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                           width: 500,
                           child: ListView.builder(
                             shrinkWrap: true,
-                            itemCount: hist.length > 5
-                                ? 5
-                                : hist.length,
+                            itemCount:
+                                hist.length > 5 ? 5 : hist.length,
                             itemBuilder: (c, i) {
                               var d = hist[i].data()
                                   as Map<String, dynamic>;
                               return Card(
-                                margin: const EdgeInsets.only(
-                                    bottom: 12),
+                                margin:
+                                    const EdgeInsets.only(bottom: 12),
                                 elevation: 1,
                                 shape: RoundedRectangleBorder(
                                     borderRadius:
@@ -1921,8 +2447,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                               color: Colors.black87),
                                           children: [
                                             const TextSpan(
-                                                text:
-                                                    'Falha encontrada: ',
+                                                text: 'Falha encontrada: ',
                                                 style: TextStyle(
                                                     fontWeight:
                                                         FontWeight.bold)),
@@ -1955,8 +2480,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                   icon: const Icon(Icons.map, color: Colors.blueGrey),
                   label: const Text('G Maps',
                       style: TextStyle(color: Colors.blueGrey)),
-                  onPressed: () => _abrirOpcoesRota(
-                      data['semaforo']?.toString() ?? ''),
+                  onPressed: () =>
+                      _abrirOpcoesRota(data['semaforo']?.toString() ?? ''),
                 ),
               ],
             ),
@@ -1970,8 +2495,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                   color: Colors.white),
               label: const Text('Acessar Programação',
                   style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold)),
+                      color: Colors.white, fontWeight: FontWeight.bold)),
               onPressed: () {
                 String numSem =
                     (data['semaforo']?.toString() ?? '')
@@ -1983,8 +2507,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                 Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (context) => TelaProgramacao(
-                            semaforoInicial: numSem)));
+                        builder: (context) =>
+                            TelaProgramacao(semaforoInicial: numSem)));
               },
             ),
           ],
@@ -2002,8 +2526,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
         height: MediaQuery.of(context).size.height * 0.85,
         decoration: const BoxDecoration(
           color: Colors.white,
-          borderRadius:
-              BorderRadius.vertical(top: Radius.circular(20)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -2034,15 +2557,12 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                     _buildInfoRow('Empresa',
                         data['empresa_semaforo'] ??
                             data['empresa_responsavel']),
-                    _buildInfoRow(
-                        'Origem', data['origem_da_ocorrencia']),
+                    _buildInfoRow('Origem', data['origem_da_ocorrencia']),
                     const Divider(),
                     _buildInfoRow('Data Abertura',
-                        _formatarDataHoraCompleta(
-                            data['data_de_abertura'])),
+                        _formatarDataHoraCompleta(data['data_de_abertura'])),
                     _buildInfoRow('Data Atendimento',
-                        _formatarDataHoraCompleta(
-                            data['data_atendimento'])),
+                        _formatarDataHoraCompleta(data['data_atendimento'])),
                     _buildInfoRow('Data Finalização',
                         _formatarDataHoraCompleta(
                             data['data_de_finalizacao'])),
@@ -2054,11 +2574,10 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                             data['equipe_responsavel']),
                     _buildInfoRow('Placa', data['placa_veiculo']),
                     const Divider(),
-                    _buildInfoRow('Status',
-                        data['status']?.toString().toUpperCase()),
-                    _buildInfoRow('Falha Relatada', data['tipo_da_falha']),
                     _buildInfoRow(
-                        'Detalhes/Abertura', data['detalhes']),
+                        'Status', data['status']?.toString().toUpperCase()),
+                    _buildInfoRow('Falha Relatada', data['tipo_da_falha']),
+                    _buildInfoRow('Detalhes/Abertura', data['detalhes']),
                     _buildInfoRow(
                         'Falha Encontrada', data['falha_aparente_final']),
                     _buildInfoRow('Ação Técnica', data['acao_equipe']),
@@ -2072,15 +2591,13 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                               color: Color(0xFF2c3e50),
                               fontSize: 13)),
                       const SizedBox(height: 6),
-                      ...(data['materiais_utilizados'] as List).map(
-                          (mat) {
+                      ...(data['materiais_utilizados'] as List).map((mat) {
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 4),
                           child: Text(
                               '${mat['quantidade']}x - ${mat['material']}',
                               style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.black87)),
+                                  fontSize: 13, color: Colors.black87)),
                         );
                       }),
                     ],
@@ -2097,16 +2614,30 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                       Wrap(
                         spacing: 10,
                         runSpacing: 10,
-                        children: (data['fotos_finalizacao'] as List)
-                            .map((base64Str) {
+                        children:
+                            (data['fotos_finalizacao'] as List).asMap().entries.map((entry) {
+                          int idx = entry.key;
+                          dynamic fotoData = entry.value;
                           try {
-                            return ClipRRect(
+                            String fotoStr = fotoData.toString();
+                            Widget thumb = ClipRRect(
                               borderRadius: BorderRadius.circular(8),
-                              child: Image.memory(
-                                  base64Decode(base64Str),
-                                  width: 100,
-                                  height: 100,
-                                  fit: BoxFit.cover),
+                              child: fotoStr.startsWith('http')
+                                  ? Image.network(fotoStr,
+                                      width: 100,
+                                      height: 100,
+                                      fit: BoxFit.cover)
+                                  : Image.memory(base64Decode(fotoStr),
+                                      width: 100,
+                                      height: 100,
+                                      fit: BoxFit.cover),
+                            );
+                            return GestureDetector(
+                              onTap: () => _abrirFotoTelaCheia(
+                                  context,
+                                  data['fotos_finalizacao'] as List,
+                                  idx),
+                              child: thumb,
                             );
                           } catch (e) {
                             return const SizedBox.shrink();
@@ -2127,8 +2658,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
               onPressed: () => Navigator.pop(context),
               child: const Text('Voltar',
                   style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold)),
+                      color: Colors.white, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -2155,8 +2685,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
           Expanded(
             child: Text(
               value?.toString() ?? '---',
-              style:
-                  const TextStyle(fontSize: 13, color: Colors.black87),
+              style: const TextStyle(fontSize: 13, color: Colors.black87),
             ),
           ),
         ],
@@ -2171,10 +2700,9 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
       bool isAberto = st.contains('aberto') ||
           st.contains('pendente') ||
           (st.contains('aguardando') && !st.contains('baixa'));
-      String eq =
-          (d['equipe_responsavel'] ?? d['equipe_atrelada'] ?? '')
-              .toString()
-              .trim();
+      String eq = (d['equipe_responsavel'] ?? d['equipe_atrelada'] ?? '')
+          .toString()
+          .trim();
       return isAberto && (eq.isEmpty || eq == '-' || eq == 'null');
     }).toList();
 
@@ -2196,10 +2724,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
         var d = pendentes[index].data() as Map<String, dynamic>;
         String empresa = (d['empresa_semaforo'] ?? '').toString();
         if (empresa.isEmpty) {
-          String numSemAux =
-              _formatarId(d['semaforo']?.toString() ?? '');
-          var semInfo = _semaforosAux.firstWhere(
-              (s) => s['id'] == numSemAux,
+          String numSemAux = _formatarId(d['semaforo']?.toString() ?? '');
+          var semInfo = _semaforosAux.firstWhere((s) => s['id'] == numSemAux,
               orElse: () => <String, dynamic>{});
           empresa = (semInfo['empresa'] ?? '---').toString();
         }
@@ -2212,12 +2738,10 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
             dense: true,
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            title: Text(
-                '🚦 ${d['semaforo']} - ${d['tipo_da_falha']}',
+            title: Text('🚦 ${d['semaforo']} - ${d['tipo_da_falha']}',
                 style: const TextStyle(
                     fontWeight: FontWeight.bold, fontSize: 12)),
-            subtitle: Text(
-                '${d['endereco'] ?? ''}\nEmpresa: $empresa',
+            subtitle: Text('${d['endereco'] ?? ''}\nEmpresa: $empresa',
                 style: const TextStyle(fontSize: 10),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis),
@@ -2234,8 +2758,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                       fontWeight: FontWeight.bold)),
             ),
             onTap: () {
-              String numSem =
-                  _formatarId(d['semaforo']?.toString() ?? '');
+              String numSem = _formatarId(d['semaforo']?.toString() ?? '');
               LatLng? c = _mapaCoordenadasSemaforos[numSem];
               if (c != null) _mapController.move(c, 17);
               _abrirDetalhes(pendentes[index].id, d);
@@ -2271,8 +2794,12 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
         String placa = eq['placa'] ?? 'S/ PLACA';
         String placaExibicao =
             tipoVeiculo.isNotEmpty ? '$placa ($tipoVeiculo)' : placa;
-        String nomeLider =
-            (eq['integrantes_str'] ?? '').toString().split(',').first.trim().toUpperCase();
+        String nomeLider = (eq['integrantes_str'] ?? '')
+            .toString()
+            .split(',')
+            .first
+            .trim()
+            .toUpperCase();
         if (nomeLider.isEmpty) nomeLider = "Equipe $placa";
 
         final tarefas = _todasOcorrencias.where((oc) {
@@ -2281,12 +2808,12 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
               (d['equipe_responsavel'] ?? d['equipe_atrelada'] ?? '')
                   .toString()
                   .toUpperCase();
-          if (!eqResp.contains(nomeLider) &&
-              !eqResp.contains(placa)) return false;
+          if (!eqResp.contains(nomeLider) && !eqResp.contains(placa)) {
+            return false;
+          }
 
           String st = (d['status'] ?? '').toLowerCase();
-          bool isConcluido =
-              st.contains('conclu') || st.contains('finaliz');
+          bool isConcluido = st.contains('conclu') || st.contains('finaliz');
 
           if (isConcluido) {
             if (d['data_de_finalizacao'] != null) {
@@ -2324,8 +2851,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Expanded(
-                      child: Text(
-                          '🚗 $placaExibicao\n$nomeLider',
+                      child: Text('🚗 $placaExibicao\n$nomeLider',
                           style: const TextStyle(
                               color: Colors.white,
                               fontSize: 11,
@@ -2356,8 +2882,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                     : Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: tarefas.map((tDoc) {
-                          var t =
-                              tDoc.data() as Map<String, dynamic>;
+                          var t = tDoc.data() as Map<String, dynamic>;
                           String st =
                               (t['status'] ?? 'aberto').toLowerCase();
                           bool isConcluido = st.contains('conclu') ||
@@ -2451,8 +2976,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.check_circle_outline,
-                color: Colors.green, size: 60),
+            Icon(Icons.check_circle_outline, color: Colors.green, size: 60),
             SizedBox(height: 16),
             Text(
                 'Nenhuma ocorrência pendente.\nAguarde novos chamados da central.',
@@ -2493,8 +3017,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                 Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                      color: cor,
-                      borderRadius: BorderRadius.circular(4)),
+                      color: cor, borderRadius: BorderRadius.circular(4)),
                   child: Text(stDisplay,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
@@ -2507,10 +3030,10 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                   Expanded(
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.route, size: 14),
-                      label: const Text('Rota',
-                          style: TextStyle(fontSize: 11)),
-                      onPressed: () => _abrirOpcoesRota(
-                          d['semaforo']?.toString() ?? ''),
+                      label:
+                          const Text('Rota', style: TextStyle(fontSize: 11)),
+                      onPressed: () =>
+                          _abrirOpcoesRota(d['semaforo']?.toString() ?? ''),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -2597,21 +3120,13 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                 builder: (context, snapshotEq) {
                   if (!snapshotOcc.hasData || !snapshotEq.hasData) {
                     return const Center(
-                        child: CircularProgressIndicator(
-                            color: Colors.white));
+                        child:
+                            CircularProgressIndicator(color: Colors.white));
                   }
 
                   _todasOcorrencias = snapshotOcc.data!.docs;
                   _todasEquipes = snapshotEq.data!.docs;
 
-                  Set<String> emps = {'TODAS'};
-                  for (var oc in _todasOcorrencias) {
-                    String e = (oc.data() as Map<String,
-                                dynamic>)['empresa_responsavel'] ??
-                        '';
-                    if (e.isNotEmpty) emps.add(e);
-                  }
-                  _empresasOptions = emps.toList()..sort();
                   if (!_empresasOptions.contains(_filtroEmpresa)) {
                     _filtroEmpresa = 'TODAS';
                   }
@@ -2626,8 +3141,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                       {};
                   for (var doc in ocorrenciasParaMapa) {
                     var data = doc.data() as Map<String, dynamic>;
-                    String numSem = _formatarId(
-                        data['semaforo']?.toString() ?? '');
+                    String numSem =
+                        _formatarId(data['semaforo']?.toString() ?? '');
                     if (!mapaAgrupado.containsKey(numSem)) {
                       mapaAgrupado[numSem] = [];
                     }
@@ -2636,35 +3151,30 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
 
                   List<Marker> marcadores = [];
                   mapaAgrupado.forEach((numSem, listaDocs) {
-                    LatLng? coords =
-                        _mapaCoordenadasSemaforos[numSem];
+                    LatLng? coords = _mapaCoordenadasSemaforos[numSem];
                     if (coords != null) {
                       int piorPeso = 99;
                       String assetPath = 'assets/images/aberto.png';
                       bool temAguardandoBaixa = false;
 
                       for (var d in listaDocs) {
-                        var data =
-                            d.data() as Map<String, dynamic>;
+                        var data = d.data() as Map<String, dynamic>;
                         String st =
                             (data['status'] ?? 'aberto').toString().toLowerCase();
                         int w = _getStatusWeight(st);
                         if (w < piorPeso) {
                           piorPeso = w;
                           if (st.contains('deslocamento')) {
-                            assetPath =
-                                'assets/images/deslocamento.png';
+                            assetPath = 'assets/images/deslocamento.png';
                           } else if (st.contains('atendimento')) {
-                            assetPath =
-                                'assets/images/atendimento.png';
+                            assetPath = 'assets/images/atendimento.png';
                           } else if (st.contains('aguardando baixa')) {
-                            assetPath =
-                                'assets/images/atendimento.png';
+                            assetPath = 'assets/images/atendimento.png';
                           } else {
                             assetPath = 'assets/images/aberto.png';
                           }
                         }
-                        
+
                         if (st.contains('aguardando baixa')) {
                           temAguardandoBaixa = true;
                         }
@@ -2698,16 +3208,14 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                         shrinkWrap: true,
                                         itemCount: listaDocs.length,
                                         itemBuilder: (c, i) {
-                                          var data = listaDocs[i]
-                                              .data() as Map<
-                                                  String, dynamic>;
+                                          var data = listaDocs[i].data()
+                                              as Map<String, dynamic>;
                                           return Card(
-                                            margin: const EdgeInsets
-                                                .only(bottom: 8),
+                                            margin: const EdgeInsets.only(
+                                                bottom: 8),
                                             child: ListTile(
                                               title: Text(
-                                                  data['tipo_da_falha'] ??
-                                                      ''),
+                                                  data['tipo_da_falha'] ?? ''),
                                               subtitle: Text(
                                                   'Status: ${data['status']}'),
                                               trailing: const Icon(
@@ -2716,8 +3224,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                               onTap: () {
                                                 Navigator.pop(ctx);
                                                 _abrirDetalhes(
-                                                    listaDocs[i].id,
-                                                    data);
+                                                    listaDocs[i].id, data);
                                               },
                                             ),
                                           );
@@ -2753,8 +3260,10 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                               width: 40,
                                               height: 40,
                                               fit: BoxFit.contain,
-                                              errorBuilder: (context, error, stackTrace) =>
-                                                  const Icon(Icons.warning, color: Colors.red),
+                                              errorBuilder: (context, error,
+                                                      stackTrace) =>
+                                                  const Icon(Icons.warning,
+                                                      color: Colors.red),
                                             ),
                                           )
                                         : Image.asset(
@@ -2762,21 +3271,21 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                             width: 40,
                                             height: 40,
                                             fit: BoxFit.contain,
-                                            errorBuilder: (context, error, stackTrace) =>
-                                                const Icon(Icons.warning, color: Colors.red),
+                                            errorBuilder: (context, error,
+                                                    stackTrace) =>
+                                                const Icon(Icons.warning,
+                                                    color: Colors.red),
                                           ),
                                     if (listaDocs.length > 1)
                                       Positioned(
                                         right: 0,
                                         top: 0,
                                         child: Container(
-                                          padding:
-                                              const EdgeInsets.all(4),
+                                          padding: const EdgeInsets.all(4),
                                           decoration: const BoxDecoration(
                                               color: Colors.red,
                                               shape: BoxShape.circle),
-                                          child: Text(
-                                              '${listaDocs.length}',
+                                          child: Text('${listaDocs.length}',
                                               style: const TextStyle(
                                                   color: Colors.white,
                                                   fontSize: 10,
@@ -2793,8 +3302,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                     color: Colors.white,
                                     border: Border.all(
                                         color: Colors.black54, width: 1),
-                                    borderRadius:
-                                        BorderRadius.circular(6),
+                                    borderRadius: BorderRadius.circular(6),
                                     boxShadow: const [
                                       BoxShadow(
                                           color: Colors.black26,
@@ -2818,14 +3326,12 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                     }
                   });
 
-                  bool isEquipeLogada =
-                      _perfilLogado.contains('equipe') ||
-                          _perfilLogado.contains('tecnica') ||
-                          _perfilLogado.contains('técnica');
+                  bool isEquipeLogada = _perfilLogado.contains('equipe') ||
+                      _perfilLogado.contains('tecnica') ||
+                      _perfilLogado.contains('técnica');
 
                   if (isEquipeLogada) {
-                    var novasAtribuidas =
-                        ocorrenciasParaMapa.where((doc) {
+                    var novasAtribuidas = ocorrenciasParaMapa.where((doc) {
                       var d = doc.data() as Map<String, dynamic>;
                       String st =
                           (d['status'] ?? '').toString().toLowerCase();
@@ -2837,31 +3343,34 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                         _ocorrenciasAlertadas.add(nova.id);
                         WidgetsBinding.instance
                             .addPostFrameCallback((_) async {
-                          // REPRODUZ O ÁUDIO NA EQUIPE
-                          await _audioPlayer.play(AssetSource('audios/alerta.mp3'));
+                          await _audioPlayer
+                              .play(AssetSource('audios/alerta.mp3'));
                           _mostrarAlertaNovaOcorrencia(nova);
                         });
                       }
                     }
                   } else {
-                    // ALERTA PARA O OPERADOR DA CENTRAL QUANDO A EQUIPE PRÉ-FINALIZAR
                     var aguardandoBaixa = ocorrenciasParaMapa.where((doc) {
                       var d = doc.data() as Map<String, dynamic>;
-                      String st = (d['status'] ?? '').toString().toLowerCase();
+                      String st =
+                          (d['status'] ?? '').toString().toLowerCase();
                       return st.contains('aguardando baixa');
                     }).toList();
 
                     for (var ocorrencia in aguardandoBaixa) {
-                      if (!_ocorrenciasAlertadas.contains(ocorrencia.id)) {
+                      if (!_ocorrenciasAlertadas
+                          .contains(ocorrencia.id)) {
                         _ocorrenciasAlertadas.add(ocorrencia.id);
-                        WidgetsBinding.instance.addPostFrameCallback((_) async {
-                          // REPRODUZ O ÁUDIO NA CENTRAL
-                          await _audioPlayer.play(AssetSource('audios/alerta.mp3'));
-                          
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        WidgetsBinding.instance
+                            .addPostFrameCallback((_) async {
+                          await _audioPlayer
+                              .play(AssetSource('audios/alerta.mp3'));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
                             content: Text(
                               '⚠️ EQUIPE AGUARDANDO BAIXA: Semáforo ${(ocorrencia.data() as Map)['semaforo']}',
-                              style: const TextStyle(fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold),
                             ),
                             backgroundColor: Colors.teal,
                             duration: const Duration(seconds: 5),
@@ -2877,8 +3386,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                       Expanded(
                         child: LayoutBuilder(
                           builder: (context, constraints) {
-                            bool isDesktop =
-                                constraints.maxWidth > 900;
+                            bool isDesktop = constraints.maxWidth > 900;
 
                             Widget mapaWidget = Container(
                               margin: const EdgeInsets.all(16),
@@ -2903,8 +3411,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                           userAgentPackageName:
                                               'com.seusistema.sos',
                                         ),
-                                        MarkerLayer(
-                                            markers: marcadores),
+                                        MarkerLayer(markers: marcadores),
                                       ],
                                     ),
                                     if (!isEquipeLogada)
@@ -2912,14 +3419,13 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                         top: 10,
                                         left: 10,
                                         child: ElevatedButton.icon(
-                                          style:
-                                              ElevatedButton.styleFrom(
+                                          style: ElevatedButton.styleFrom(
                                             backgroundColor:
                                                 const Color(0xFF5cb85c),
-                                            padding: const EdgeInsets
-                                                .symmetric(
-                                                horizontal: 16,
-                                                vertical: 12),
+                                            padding:
+                                                const EdgeInsets.symmetric(
+                                                    horizontal: 16,
+                                                    vertical: 12),
                                           ),
                                           icon: const Icon(Icons.add,
                                               color: Colors.white,
@@ -2953,8 +3459,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                               ? const EdgeInsets.all(12)
                                               : EdgeInsets.zero,
                                           decoration: BoxDecoration(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.95),
+                                            color: Colors.white.withValues(
+                                                alpha: 0.95),
                                             borderRadius:
                                                 BorderRadius.circular(8),
                                             boxShadow: const [
@@ -3019,24 +3525,21 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                                       _buildCheckboxFiltro(
                                                           'Aberto',
                                                           _fStatusAberto,
-                                                          (v) => setState(
-                                                              () => _fStatusAberto =
-                                                                  v ??
-                                                                      false)),
+                                                          (v) => setState(() =>
+                                                              _fStatusAberto =
+                                                                  v ?? false)),
                                                       _buildCheckboxFiltro(
                                                           'Desloc.',
                                                           _fStatusDesloc,
-                                                          (v) => setState(
-                                                              () => _fStatusDesloc =
-                                                                  v ??
-                                                                      false)),
+                                                          (v) => setState(() =>
+                                                              _fStatusDesloc =
+                                                                  v ?? false)),
                                                       _buildCheckboxFiltro(
                                                           'Atend.',
                                                           _fStatusAtend,
-                                                          (v) => setState(
-                                                              () => _fStatusAtend =
-                                                                  v ??
-                                                                      false)),
+                                                          (v) => setState(() =>
+                                                              _fStatusAtend =
+                                                                  v ?? false)),
                                                       const Divider(),
                                                       const Text(
                                                           'PRIORIDADE',
@@ -3050,24 +3553,21 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                                       _buildCheckboxFiltro(
                                                           'Alta',
                                                           _fPrioAlta,
-                                                          (v) => setState(
-                                                              () => _fPrioAlta =
-                                                                  v ??
-                                                                      false)),
+                                                          (v) => setState(() =>
+                                                              _fPrioAlta =
+                                                                  v ?? false)),
                                                       _buildCheckboxFiltro(
                                                           'Média',
                                                           _fPrioMedia,
-                                                          (v) => setState(
-                                                              () => _fPrioMedia =
-                                                                  v ??
-                                                                      false)),
+                                                          (v) => setState(() =>
+                                                              _fPrioMedia =
+                                                                  v ?? false)),
                                                       _buildCheckboxFiltro(
                                                           'Baixa',
                                                           _fPrioBaixa,
-                                                          (v) => setState(
-                                                              () => _fPrioBaixa =
-                                                                  v ??
-                                                                      false)),
+                                                          (v) => setState(() =>
+                                                              _fPrioBaixa =
+                                                                  v ?? false)),
                                                       const Divider(),
                                                       const Text(
                                                           'ALERTAS DE TEMPO',
@@ -3081,41 +3581,50 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                                       _buildCheckboxFiltro(
                                                           '> 24h',
                                                           _fMais24h,
-                                                          (v) => setState(
-                                                              () => _fMais24h =
-                                                                  v ??
-                                                                      false)),
+                                                          (v) => setState(() =>
+                                                              _fMais24h =
+                                                                  v ?? false)),
                                                       _buildCheckboxFiltro(
                                                           'Fora Prazo',
                                                           _fForaPrazo,
-                                                          (v) => setState(
-                                                              () => _fForaPrazo =
-                                                                  v ??
-                                                                      false)),
+                                                          (v) => setState(() =>
+                                                              _fForaPrazo =
+                                                                  v ?? false)),
                                                       const Divider(),
+                                                      const Text(
+                                                          'EMPRESA',
+                                                          style: TextStyle(
+                                                              fontSize: 10,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              color: Colors
+                                                                  .grey)),
+                                                      const SizedBox(height: 4),
                                                       DropdownButtonFormField<
                                                           String>(
                                                         isDense: true,
+                                                        isExpanded: true,
                                                         style: const TextStyle(
                                                             fontSize: 11,
                                                             color: Colors
                                                                 .black87),
-                                                        decoration: const InputDecoration(
-                                                            isDense: true,
-                                                            border:
-                                                                InputBorder
-                                                                    .none),
-                                                        initialValue:
-                                                            _filtroEmpresa,
+                                                        decoration:
+                                                            const InputDecoration(
+                                                                isDense: true,
+                                                                border:
+                                                                    InputBorder
+                                                                        .none),
+                                                        value: _filtroEmpresa,
                                                         items: _empresasOptions
                                                             .map((e) =>
                                                                 DropdownMenuItem(
-                                                                    value:
-                                                                        e,
+                                                                    value: e,
                                                                     child: Text(
                                                                         e,
                                                                         overflow:
-                                                                            TextOverflow.ellipsis)))
+                                                                            TextOverflow
+                                                                                .ellipsis)))
                                                             .toList(),
                                                         onChanged: (v) =>
                                                             setState(() =>
@@ -3128,8 +3637,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                               : Container(),
                                         ),
                                       ),
-                                    if (!_filtrosVisiveis &&
-                                        !isEquipeLogada)
+                                    if (!_filtrosVisiveis && !isEquipeLogada)
                                       Positioned(
                                         top: 10,
                                         right: 10,
@@ -3137,8 +3645,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                           backgroundColor: Colors.white,
                                           onPressed: () => setState(() =>
                                               _filtrosVisiveis = true),
-                                          child: const Icon(
-                                              Icons.filter_alt,
+                                          child: const Icon(Icons.filter_alt,
                                               color: Colors.blueGrey),
                                         ),
                                       ),
@@ -3157,10 +3664,9 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                     right: 16,
                                     left: isDesktop ? 0 : 16),
                                 decoration: BoxDecoration(
-                                    color: Colors.black
-                                        .withValues(alpha: 0.5),
-                                    borderRadius:
-                                        BorderRadius.circular(12),
+                                    color:
+                                        Colors.black.withValues(alpha: 0.5),
+                                    borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
                                         color: Colors.white24)),
                                 child: Column(
@@ -3195,10 +3701,9 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                     right: 16,
                                     left: isDesktop ? 0 : 16),
                                 decoration: BoxDecoration(
-                                    color: Colors.black
-                                        .withValues(alpha: 0.5),
-                                    borderRadius:
-                                        BorderRadius.circular(12),
+                                    color:
+                                        Colors.black.withValues(alpha: 0.5),
+                                    borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
                                         color: Colors.white24)),
                                 child: SingleChildScrollView(
@@ -3216,8 +3721,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                             'OCORRÊNCIAS EM ABERTO',
                                             style: TextStyle(
                                                 color: Colors.redAccent,
-                                                fontWeight:
-                                                    FontWeight.bold,
+                                                fontWeight: FontWeight.bold,
                                                 fontSize: 13,
                                                 letterSpacing: 1)),
                                       ),
@@ -3231,8 +3735,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
                                         child: Text('EQUIPES EM CAMPO',
                                             style: TextStyle(
                                                 color: Colors.white,
-                                                fontWeight:
-                                                    FontWeight.bold,
+                                                fontWeight: FontWeight.bold,
                                                 fontSize: 13,
                                                 letterSpacing: 1)),
                                       ),
@@ -3245,17 +3748,13 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias> with SingleTi
 
                             if (isDesktop) {
                               return Row(children: [
-                                Expanded(
-                                    flex: 3, child: mapaWidget),
-                                Expanded(
-                                    flex: 1, child: sidebarWidget)
+                                Expanded(flex: 3, child: mapaWidget),
+                                Expanded(flex: 1, child: sidebarWidget)
                               ]);
                             } else {
                               return Column(children: [
-                                Expanded(
-                                    flex: 3, child: mapaWidget),
-                                Expanded(
-                                    flex: 2, child: sidebarWidget)
+                                Expanded(flex: 3, child: mapaWidget),
+                                Expanded(flex: 2, child: sidebarWidget)
                               ]);
                             }
                           },
