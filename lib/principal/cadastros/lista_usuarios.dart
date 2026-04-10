@@ -23,7 +23,7 @@ class ListaUsuarios extends StatefulWidget {
 }
 
 class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProviderStateMixin {
-  // Lista de perfis para o Dropdown (se adicionar aqui, vai pro form e pro dashboard automaticamente!)
+  // Lista de perfis para o Dropdown
   final List<String> _perfis = [
     'Callcenter', 
     'Vistoriador', 
@@ -37,6 +37,10 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
   final TextEditingController _buscaController = TextEditingController();
   String _termoBusca = '';
 
+  // LISTA PARA ARMAZENAR OS INTEGRANTES FIXOS CADASTRADOS NO BANCO
+  List<String> _listaDeIntegrantesFixos = [];
+  bool _carregandoIntegrantes = true;
+
   @override
   void initState() {
     super.initState();
@@ -44,6 +48,7 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
     _tabController.addListener(() {
       setState(() {}); 
     });
+    _buscarIntegrantesCadastrados();
   }
 
   @override
@@ -51,6 +56,35 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
     _tabController.dispose();
     _buscaController.dispose();
     super.dispose();
+  }
+
+  // --- NOVA FUNÇÃO: Busca os Integrantes da coleção "integrantes" ---
+  Future<void> _buscarIntegrantesCadastrados() async {
+    try {
+      final snap = await FirebaseFirestore.instance.collection('integrantes').get();
+      List<String> tempIntegrantes = [];
+
+      for (var doc in snap.docs) {
+        var d = doc.data();
+        String nome = (d['nomeCompleto'] ?? d['nome'] ?? '').toString().toUpperCase().trim();
+        
+        if (nome.isNotEmpty && !tempIntegrantes.contains(nome)) {
+          tempIntegrantes.add(nome);
+        }
+      }
+
+      tempIntegrantes.sort();
+
+      if (mounted) {
+        setState(() {
+          _listaDeIntegrantesFixos = tempIntegrantes;
+          _carregandoIntegrantes = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Erro ao buscar integrantes na coleção: $e");
+      if (mounted) setState(() => _carregandoIntegrantes = false);
+    }
   }
 
   // --- Função para Excluir Usuário ---
@@ -88,8 +122,14 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
     final usuarioController = TextEditingController(text: dadosAtuais?['username'] ?? '');
     final emailController = TextEditingController(text: dadosAtuais?['email'] ?? '');
     final senhaController = TextEditingController(); 
-    String? perfilSelecionado = dadosAtuais?['perfil'];
     
+    String? perfilSelecionado = dadosAtuais?['perfil'];
+    String? integranteSelecionado = dadosAtuais?['integrante_atrelado']; // Novo campo para atrelamento
+    
+    // Se o integrante selecionado não estiver na lista (ex: mudaram/apagaram o nome), deixa null
+    bool existeNaLista = _listaDeIntegrantesFixos.contains(integranteSelecionado);
+    if (!existeNaLista) integranteSelecionado = null;
+
     bool ocultarSenha = true;
     bool estaCarregando = false;
     bool isEditando = docId != null;
@@ -101,6 +141,9 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
       builder: (context) {
         return StatefulBuilder( 
           builder: (context, setStateModal) {
+            // Lógica para mostrar/esconder o campo de integrante
+            bool ehEquipeTecnica = (perfilSelecionado ?? '').toLowerCase().contains('equipe');
+
             return Padding(
               padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
               child: Container(
@@ -154,10 +197,53 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
                           decoration: const InputDecoration(labelText: 'Perfil de Acesso', border: OutlineInputBorder(), prefixIcon: Icon(Icons.admin_panel_settings)),
                           value: perfilSelecionado,
                           items: _perfis.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-                          onChanged: (val) => setStateModal(() => perfilSelecionado = val),
+                          onChanged: (val) {
+                            setStateModal(() {
+                              perfilSelecionado = val;
+                              // Se trocar de perfil e não for equipe técnica, limpa o integrante selecionado
+                              if (!(val ?? '').toLowerCase().contains('equipe')) {
+                                integranteSelecionado = null;
+                              }
+                            });
+                          },
                           validator: (value) => value == null ? 'Obrigatório' : null,
                         ),
                         const SizedBox(height: 12),
+
+                        // --- NOVO CAMPO: ATRELAR INTEGRANTE (SÓ APARECE SE FOR EQUIPE TÉCNICA E TIVER ALGUÉM CADASTRADO) ---
+                        if (ehEquipeTecnica) ...[
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.orange.shade200)),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Atrelar Usuário ao Integrante da Equipe', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepOrange)),
+                                const SizedBox(height: 8),
+                                if (_carregandoIntegrantes)
+                                  const Center(child: CircularProgressIndicator())
+                                else if (_listaDeIntegrantesFixos.isEmpty)
+                                  const Text('Nenhum integrante cadastrado no sistema.', style: TextStyle(color: Colors.red, fontStyle: FontStyle.italic))
+                                else
+                                  DropdownButtonFormField<String>(
+                                    isExpanded: true,
+                                    decoration: const InputDecoration(filled: true, fillColor: Colors.white, border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+                                    hint: const Text('Selecione o Integrante...'),
+                                    value: integranteSelecionado,
+                                    items: _listaDeIntegrantesFixos.map((nomeInt) {
+                                      return DropdownMenuItem<String>(
+                                        value: nomeInt, 
+                                        child: Text(nomeInt, overflow: TextOverflow.ellipsis)
+                                      );
+                                    }).toList(),
+                                    onChanged: (val) => setStateModal(() => integranteSelecionado = val),
+                                    validator: (value) => value == null ? 'Por favor, selecione o integrante correspondente.' : null,
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
 
                         TextFormField(
                           controller: senhaController,
@@ -190,10 +276,19 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
                             if (formKey.currentState!.validate()) {
                               setStateModal(() => estaCarregando = true);
                               try {
+                                
+                                String nomeParaSalvar = nomeController.text.trim().toUpperCase();
+                                
+                                // Se for equipe, o nome do sistema passa a ser o nome do Integrante para garantir padrão
+                                if (ehEquipeTecnica && integranteSelecionado != null) {
+                                  nomeParaSalvar = integranteSelecionado!;
+                                }
+
                                 if (isEditando) {
                                   await FirebaseFirestore.instance.collection('usuarios').doc(docId).update({
-                                    'nomeCompleto': nomeController.text.trim().toUpperCase(),
+                                    'nomeCompleto': nomeParaSalvar,
                                     'perfil': perfilSelecionado,
+                                    'integrante_atrelado': ehEquipeTecnica ? integranteSelecionado : null,
                                   });
                                   if (mounted) Navigator.pop(context); 
                                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Atualizado com sucesso!'), backgroundColor: Colors.green));
@@ -204,10 +299,11 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
                                   );
 
                                   await FirebaseFirestore.instance.collection('usuarios').doc(cred.user!.uid).set({
-                                    'nomeCompleto': nomeController.text.trim().toUpperCase(),
+                                    'nomeCompleto': nomeParaSalvar,
                                     'username': usuarioController.text.trim().toLowerCase(),
                                     'email': emailController.text.trim().toLowerCase(),
                                     'perfil': perfilSelecionado,
+                                    'integrante_atrelado': ehEquipeTecnica ? integranteSelecionado : null,
                                     'dataCadastro': FieldValue.serverTimestamp(),
                                     'ativo': true,
                                   });
@@ -296,10 +392,11 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
                 headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
                 headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey800),
                 data: <List<String>>[
-                  <String>['Nome', 'Usuário', 'E-mail'],
+                  <String>['Nome', 'Usuário', 'E-mail', 'Atrelado a'], 
                   ...grupoDocs.map((doc) {
                     var d = doc.data() as Map<String, dynamic>;
-                    return [d['nomeCompleto']?.toString() ?? '', d['username']?.toString() ?? '', d['email']?.toString() ?? ''];
+                    String atrelado = (d['integrante_atrelado'] ?? '').toString().isNotEmpty ? d['integrante_atrelado'].toString() : '-';
+                    return [d['nomeCompleto']?.toString() ?? '', d['username']?.toString() ?? '', d['email']?.toString() ?? '', atrelado];
                   }),
                 ],
               )
@@ -315,7 +412,7 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
     await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save(), name: 'relatorio_usuarios.pdf');
   }
 
-  // --- EXPORTAÇÃO EXCEL XLSX (Substituindo o CSV) ---
+  // --- EXPORTAÇÃO EXCEL XLSX ---
   Future<void> _baixarExcel(List<QueryDocumentSnapshot> docs) async {
     final dataHora = _formatarDataHora();
     var excel = Excel.createExcel();
@@ -327,7 +424,7 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
       if (grupoDocs.isEmpty) continue;
       
       sheetObject.appendRow(<CellValue>[TextCellValue("--- PERFIL: ${perfil.toUpperCase()} ---")]);
-      sheetObject.appendRow(<CellValue>[TextCellValue("Nome"), TextCellValue("Usuário"), TextCellValue("E-mail")]); 
+      sheetObject.appendRow(<CellValue>[TextCellValue("Nome"), TextCellValue("Usuário"), TextCellValue("E-mail"), TextCellValue("Integrante Atrelado")]); 
       
       for (var doc in grupoDocs) {
         var d = doc.data() as Map<String, dynamic>;
@@ -335,6 +432,7 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
           TextCellValue((d['nomeCompleto'] ?? '').toString()),
           TextCellValue((d['username'] ?? '').toString()),
           TextCellValue((d['email'] ?? '').toString()),
+          TextCellValue((d['integrante_atrelado'] ?? '-').toString()),
         ]);
       }
       sheetObject.appendRow(<CellValue>[TextCellValue("")]); 
@@ -377,11 +475,12 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
                   itemCount: filtrados.length,
                   itemBuilder: (context, index) {
                     var d = filtrados[index].data() as Map<String, dynamic>;
+                    String integrante = (d['integrante_atrelado'] ?? '').toString();
                     return ListTile(
                       dense: true,
                       leading: const Icon(Icons.person),
                       title: Text(d['nomeCompleto'] ?? ''),
-                      subtitle: Text(d['username'] ?? ''),
+                      subtitle: Text('${d['username'] ?? ''} ${integrante.isNotEmpty ? '\nAtrelado: $integrante' : ''}'),
                     );
                   },
                 ),
@@ -528,6 +627,8 @@ class _ListaUsuariosState extends State<ListaUsuarios> with SingleTickerProvider
                                           children: [
                                             Text('User: ${data['username'] ?? ''}', style: const TextStyle(fontSize: 12)),
                                             Text('Perfil: ${data['perfil'] ?? ''}', style: const TextStyle(color: Colors.blueGrey, fontSize: 12, fontWeight: FontWeight.bold)),
+                                            if ((data['integrante_atrelado'] ?? '').toString().isNotEmpty)
+                                              Text('Atrelado a: ${data['integrante_atrelado']}', style: const TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.bold)),
                                           ],
                                         ),
                                         trailing: Row(

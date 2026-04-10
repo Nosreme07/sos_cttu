@@ -10,34 +10,70 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+    
+  # Ícones no estilo iOS (Apple)
   cupertino_icons: ^1.0.8
+  
+  # --- SERVIÇOS DO FIREBASE ---
+  # Núcleo obrigatório para conectar o app ao Firebase
   firebase_core: ^4.5.0
+  # Autenticação de usuários (Login, Senha, etc)
   firebase_auth: ^6.2.0
+  # Banco de dados na nuvem (Firestore)
   cloud_firestore: ^6.1.3
-  brasil_fields: ^1.16.0
-  pdf: ^3.11.0
-  printing: ^5.12.0
-  csv: ^6.0.0
-  share_plus: ^10.1.0
-  flutter_map: ^6.1.0
-  latlong2: ^0.9.0
-  url_launcher: ^6.2.6
-  fl_chart: ^0.68.0
-  image_picker: ^1.2.1
+  # Armazenamento de arquivos (Fotos da finalização, etc)
   firebase_storage: ^13.1.0
-  desktop_drop: ^0.7.0
-  excel: ^4.0.6
+  
+  # --- UTILITÁRIOS E FORMATAÇÃO ---
+  # Máscaras e formatos do Brasil (Placa, CPF, CEP, etc)
+  brasil_fields: ^1.16.0
+  # Formatação de datas e números (ex: DateFormat)
   intl: ^0.20.2
   
+  # --- MANIPULAÇÃO DE ARQUIVOS (PDF, CSV, EXCEL) ---
+  # Criação e manipulação de arquivos PDF
+  pdf: ^3.11.0
+  # Visualização e impressão de PDFs gerados
+  printing: ^5.12.0
+  # Leitura e escrita de arquivos CSV
+  csv: ^6.0.0
+  # Leitura e criação de planilhas do Excel (.xlsx)
+  excel: ^4.0.6
+  
+  # --- RECURSOS NATIVOS E INTEGRAÇÕES ---
+  # Compartilhar itens com outros apps nativos
+  share_plus: ^10.1.0
+  # Abrir links externos (Google Maps, WhatsApp, navegador)
+  url_launcher: ^6.2.6
+  # Tirar fotos com a câmera ou escolher da galeria
+  image_picker: ^1.2.1
+  # Suporte para arrastar e soltar arquivos (Drag & Drop)
+  desktop_drop: ^0.7.0
+  # Tocar arquivos de áudio (o seu alerta da central/equipe)
+  audioplayers: ^6.6.0
+  
+  # --- MAPAS E GRÁFICOS ---
+  # Mapas estilo OpenStreetMap (alternativa ao Google Maps nativo)
+  flutter_map: ^6.1.0
+  # Trabalhar com coordenadas geográficas (Latitude e Longitude)
+  latlong2: ^0.9.0
+  # Criação de gráficos (Pizza, Barras, Linhas) para dashboards
+  fl_chart: ^0.68.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # Regras de linting para manter o código padronizado
   flutter_lints: ^6.0.0
     
 flutter:
   uses-material-design: true
+  
+  # --- DECLARAÇÃO DE PASTAS DE ARQUIVOS LOCAIS ---
   assets:
+    # Imagens (logo, ícones de marcadores do mapa, etc)
     - assets/images/
+    # Arquivos JSON (talvez configurações ou dados locais)
     - assets/json/
-
+    # Pasta onde ficará o seu "alerta.mp3" (ADICIONADO PARA O ÁUDIO FUNCIONAR)
+    - assets/audios/

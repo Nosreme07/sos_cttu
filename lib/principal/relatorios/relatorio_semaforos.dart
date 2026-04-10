@@ -1026,7 +1026,7 @@ class _TelaRelatorioSemaforosState extends State<TelaRelatorioSemaforos> {
                                             ),
                                             icon: const Icon(Icons.download, color: Colors.white, size: 16),
                                             label: const Text(
-                                              'Baixar Planilha',
+                                              'Planilha com Filtro',
                                               style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                                             ),
                                             onPressed: () => _baixarExcelGlobal(docsFiltrados),
@@ -1038,7 +1038,7 @@ class _TelaRelatorioSemaforosState extends State<TelaRelatorioSemaforos> {
                                             ),
                                             icon: const Icon(Icons.picture_as_pdf, color: Colors.white, size: 16),
                                             label: const Text(
-                                              'Baixar PDF',
+                                              'PDF com Filtro',
                                               style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                                             ),
                                             onPressed: () => _exportarPdfAcervo(docsFiltrados, colunasExtras),
