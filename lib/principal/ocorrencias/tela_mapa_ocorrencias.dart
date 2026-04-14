@@ -5,7 +5,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -16,8 +15,9 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:share_plus/share_plus.dart';
-import '../programacao/tela_programacao.dart';
+import 'package:path_provider/path_provider.dart';
 
+import '../programacao/tela_programacao.dart';
 import '../../widgets/menu_usuario.dart';
 
 class UpperCaseTextFormatter extends TextInputFormatter {
@@ -368,9 +368,11 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
 
   Future<Uint8List> _adicionarCarimboNaFoto(Uint8List imageBytes) async {
     try {
+      // COMPRESSÃO EXTREMA DE RESOLUÇÃO: 350px. 
+      // Isso garante que 4 fotos em PNG codificadas em Base64 não vão estourar o 1MB do Firestore!
       final codec = kIsWeb
           ? await ui.instantiateImageCodec(imageBytes)
-          : await ui.instantiateImageCodec(imageBytes, targetWidth: 250);
+          : await ui.instantiateImageCodec(imageBytes, targetWidth: 350);
       final frame = await codec.getNextFrame();
       final image = frame.image;
       final recorder = ui.PictureRecorder();
@@ -379,12 +381,12 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
 
       final paintRect = Paint()..color = Colors.black54;
       canvas.drawRect(
-          Rect.fromLTWH(0, image.height.toDouble() - 35,
-              image.width.toDouble(), 35),
+          Rect.fromLTWH(0, image.height.toDouble() - 30,
+              image.width.toDouble(), 30),
           paintRect);
 
       final textStyle = ui.TextStyle(
-          color: Colors.yellowAccent, fontSize: 11, fontWeight: FontWeight.bold);
+          color: Colors.yellowAccent, fontSize: 10, fontWeight: FontWeight.bold);
       final paragraphStyle = ui.ParagraphStyle(textAlign: TextAlign.right);
       final paragraphBuilder = ui.ParagraphBuilder(paragraphStyle)
         ..pushStyle(textStyle)
@@ -394,7 +396,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
       paragraph.layout(
           ui.ParagraphConstraints(width: image.width.toDouble() - 10));
       canvas.drawParagraph(
-          paragraph, Offset(0, image.height.toDouble() - 25));
+          paragraph, Offset(0, image.height.toDouble() - 20));
 
       final picture = recorder.endRecording();
       final img = await picture.toImage(image.width, image.height);
@@ -607,47 +609,226 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
     );
   }
 
-  Future<List<String>> _uploadFotos(
-      List<Uint8List> fotos, String docId, String prefixo) async {
-    List<String> urls = [];
-    for (int i = 0; i < fotos.length; i++) {
-      try {
-        final String timestamp =
-            DateTime.now().millisecondsSinceEpoch.toString();
-        final String nomeArquivo =
-            'ocorrencias/${docId}_${prefixo}_${timestamp}_$i.png';
+  // Abre foto em tela cheia para visualização detalhada
+  void _abrirFotoTelaCheia(BuildContext context, List<dynamic> fotos, int indiceInicial) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (ctx) {
+        int indiceAtual = indiceInicial;
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            String fotoStr = fotos[indiceAtual].toString();
+            Widget imagemWidget = fotoStr.startsWith('http')
+                ? Image.network(fotoStr, fit: BoxFit.contain)
+                : Image.memory(base64Decode(fotoStr), fit: BoxFit.contain);
 
-        final Reference ref =
-            FirebaseStorage.instance.ref().child(nomeArquivo);
-
-        final UploadTask task = ref.putData(
-          fotos[i],
-          SettableMetadata(
-            contentType: 'image/png',
-            customMetadata: {
-              'docId': docId,
-              'indice': '$i',
-              'prefixo': prefixo,
-            },
-          ),
+            return Dialog(
+              backgroundColor: Colors.black,
+              insetPadding: const EdgeInsets.all(8),
+              child: Stack(
+                children: [
+                  InteractiveViewer(
+                    minScale: 0.5,
+                    maxScale: 5.0,
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: MediaQuery.of(ctx).size.height * 0.85,
+                      child: imagemWidget,
+                    ),
+                  ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            '${indiceAtual + 1} / ${fotos.length}',
+                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () => Navigator.pop(ctx),
+                          child: const CircleAvatar(
+                            radius: 16,
+                            backgroundColor: Colors.red,
+                            child: Icon(Icons.close, size: 18, color: Colors.white),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (indiceAtual > 0)
+                    Positioned(
+                      left: 4,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: GestureDetector(
+                          onTap: () => setDialogState(() => indiceAtual--),
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              color: Colors.black45,
+                              shape: BoxShape.circle,
+                            ),
+                            padding: const EdgeInsets.all(8),
+                            child: const Icon(Icons.chevron_left, color: Colors.white, size: 32),
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (indiceAtual < fotos.length - 1)
+                    Positioned(
+                      right: 4,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: GestureDetector(
+                          onTap: () => setDialogState(() => indiceAtual++),
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              color: Colors.black45,
+                              shape: BoxShape.circle,
+                            ),
+                            padding: const EdgeInsets.all(8),
+                            child: const Icon(Icons.chevron_right, color: Colors.white, size: 32),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
         );
-
-        final TaskSnapshot snapshot = await task;
-
-        if (snapshot.state == TaskState.success) {
-          final String url = await snapshot.ref.getDownloadURL();
-          urls.add(url);
-        } else {
-          debugPrint(
-              'Upload da foto $i não concluído. Estado: ${snapshot.state}');
-        }
-      } catch (e) {
-        debugPrint('Erro ao fazer upload da foto $i: $e');
-      }
-    }
-    return urls;
+      },
+    );
   }
 
+  // Seção de fotos da equipe destacada com aviso e miniaturas clicáveis
+  Widget _buildFotosEquipe(BuildContext context, Map<String, dynamic> dados) {
+    final List<dynamic> fotos = dados['fotos_finalizacao'] as List? ?? [];
+    if (fotos.isEmpty) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.orange.shade50,
+          border: Border.all(color: Colors.orange.shade300),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'A equipe não anexou fotos nesta ocorrência.',
+                style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.teal.shade700, Colors.teal.shade400],
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.photo_camera, color: Colors.white, size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '📸 FOTOS ENVIADAS PELA EQUIPE',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          letterSpacing: 0.5),
+                    ),
+                    Text(
+                      '${fotos.length} foto(s) — toque para ampliar',
+                      style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: fotos.asMap().entries.map((entry) {
+            int idx = entry.key;
+            String fotoStr = entry.value.toString();
+            Widget thumb;
+            try {
+              thumb = fotoStr.startsWith('http')
+                  ? Image.network(fotoStr, width: 90, height: 90, fit: BoxFit.cover)
+                  : Image.memory(base64Decode(fotoStr), width: 90, height: 90, fit: BoxFit.cover);
+            } catch (_) {
+              thumb = Container(
+                width: 90,
+                height: 90,
+                color: Colors.grey.shade200,
+                child: const Icon(Icons.broken_image, color: Colors.grey),
+              );
+            }
+
+            return GestureDetector(
+              onTap: () => _abrirFotoTelaCheia(context, fotos, idx),
+              child: Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: thumb,
+                  ),
+                  Positioned(
+                    bottom: 4,
+                    right: 4,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Icon(Icons.zoom_in, color: Colors.white, size: 14),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  // --- MODAL DE PRÉ-CONCLUSÃO DA EQUIPE ---
   void _abrirModalRelatoWhatsApp(String docId, Map<String, dynamic> data) {
     bool defeitoConstatado = true;
     final relatoCtrl = TextEditingController(text: data['relato_equipe'] ?? '');
@@ -693,6 +874,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                       'Falha Original: ${data['tipo_da_falha'] ?? '---'}\nDetalhes Iniciais: ${data['detalhes'] ?? '---'}',
                       style: const TextStyle(fontSize: 12)),
                 ),
+                
                 SwitchListTile(
                   title: const Text('Foi constatado defeito?',
                       style: TextStyle(fontWeight: FontWeight.bold)),
@@ -710,6 +892,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                     });
                   },
                 ),
+                
                 if (defeitoConstatado) ...[
                   DropdownMenu<String>(
                     expandedInsets: EdgeInsets.zero,
@@ -726,6 +909,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                   ),
                   const SizedBox(height: 10),
                 ],
+                
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: relatoCtrl,
@@ -737,6 +921,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                       border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 16),
+                
                 const Text('Fotos do Serviço (Max: 4)',
                     style: TextStyle(
                         fontWeight: FontWeight.bold, color: Colors.blueGrey)),
@@ -756,11 +941,9 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                               height: 100,
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(8),
-                                border:
-                                    Border.all(color: Colors.grey.shade300),
+                                border: Border.all(color: Colors.grey.shade300),
                                 image: DecorationImage(
-                                    image:
-                                        MemoryImage(fotosSelecionadas[index]),
+                                    image: MemoryImage(fotosSelecionadas[index]),
                                     fit: BoxFit.cover),
                               ),
                             ),
@@ -794,7 +977,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                             : () async {
                                 final XFile? foto = await _picker.pickImage(
                                     source: ImageSource.camera,
-                                    imageQuality: 60);
+                                    imageQuality: 40); 
                                 if (foto != null) {
                                   Uint8List bytes = await foto.readAsBytes();
                                   Uint8List carimbada =
@@ -815,9 +998,11 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                             : () async {
                                 final List<XFile> fotos =
                                     await _picker.pickMultiImage(
-                                        imageQuality: 60);
+                                        imageQuality: 40);
                                 for (var foto in fotos) {
-                                  if (fotosSelecionadas.length >= 4) break;
+                                  if (fotosSelecionadas.length >= 4) {
+                                    break;
+                                  }
                                   Uint8List bytes = await foto.readAsBytes();
                                   Uint8List carimbada =
                                       await _adicionarCarimboNaFoto(bytes);
@@ -855,7 +1040,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                         behavior: HitTestBehavior.opaque,
                         onTap: () async {
                           final List<XFile> fotos =
-                              await _picker.pickMultiImage(imageQuality: 60);
+                              await _picker.pickMultiImage(imageQuality: 40);
                           for (var foto in fotos) {
                             if (fotosSelecionadas.length >= 4) break;
                             Uint8List bytes = await foto.readAsBytes();
@@ -907,6 +1092,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                     ),
                   ),
                 const SizedBox(height: 16),
+                
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
@@ -920,50 +1106,38 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                               color: Colors.white, strokeWidth: 2))
                       : const Text('Pré-Concluir e Compartilhar',
                           style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold)),
+                              color: Colors.white, fontWeight: FontWeight.bold)),
                   onPressed: estaSalvando
                       ? null
                       : () async {
-                          if (defeitoConstatado &&
-                              falhaMenuCtrl.text.isEmpty) {
+                          if (defeitoConstatado && falhaMenuCtrl.text.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text(
-                                        'Preencha a falha encontrada!')));
+                                const SnackBar(content: Text('Preencha a falha encontrada!')));
                             return;
                           }
                           if (relatoCtrl.text.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text(
-                                        'Descreva a ação realizada nos detalhes!')));
+                                const SnackBar(content: Text('Descreva a ação realizada nos detalhes!')));
                             return;
                           }
 
                           setStateModal(() => estaSalvando = true);
 
                           try {
-                            List<String> fotosSalvasUrls = [];
-                            if (fotosSelecionadas.isNotEmpty) {
-                              fotosSalvasUrls = await _uploadFotos(
-                                  fotosSelecionadas, docId, 'pre');
+                            List<String> fotosBase64 = [];
+                            for (var fotoBytes in fotosSelecionadas) {
+                              fotosBase64.add(base64Encode(fotoBytes));
                             }
 
                             Map<String, dynamic> updateData = {
                               'status': 'Aguardando Baixa',
-                              'falha_aparente_final': defeitoConstatado
-                                  ? falhaMenuCtrl.text
-                                  : 'DEFEITO NÃO CONSTATADO',
-                              'relato_equipe':
-                                  relatoCtrl.text.toUpperCase(),
-                              'data_pre_conclusao':
-                                  FieldValue.serverTimestamp(),
+                              'falha_aparente_final': defeitoConstatado ? falhaMenuCtrl.text : 'DEFEITO NÃO CONSTATADO',
+                              'relato_equipe': relatoCtrl.text.toUpperCase(),
+                              'data_pre_conclusao': FieldValue.serverTimestamp(),
                             };
-
-                            if (fotosSalvasUrls.isNotEmpty) {
-                              updateData['fotos_finalizacao'] =
-                                  fotosSalvasUrls;
+                            
+                            if (fotosBase64.isNotEmpty) {
+                              updateData['fotos_finalizacao'] = fotosBase64;
                             }
 
                             await FirebaseFirestore.instance
@@ -971,21 +1145,12 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                                 .doc(docId)
                                 .update(updateData);
 
-                            String semaforoInfo = _formatarId(
-                                data['semaforo']?.toString() ?? '');
-                            String equipeNomes = data[
-                                    'integrantes_equipe'] ??
-                                data['equipe_atrelada'] ??
-                                data['equipe_responsavel'] ??
-                                'NÃO INFORMADA';
-                            String defeitoRelatado =
-                                data['tipo_da_falha'] ?? 'NÃO INFORMADO';
-                            String defeitoTexto = defeitoConstatado
-                                ? falhaMenuCtrl.text
-                                : 'DEFEITO NÃO CONSTATADO';
-
-                            String mensagem =
-                                "🚨 *OCORRÊNCIA PRÉ-CONCLUÍDA*\n\n"
+                            String semaforoInfo = _formatarId(data['semaforo']?.toString() ?? '');
+                            String equipeNomes = data['integrantes_equipe'] ?? data['equipe_atrelada'] ?? data['equipe_responsavel'] ?? 'NÃO INFORMADA';
+                            String defeitoRelatado = data['tipo_da_falha'] ?? 'NÃO INFORMADO';
+                            String defeitoTexto = defeitoConstatado ? falhaMenuCtrl.text : 'DEFEITO NÃO CONSTATADO';
+                            
+                            String mensagem = "🚨 *OCORRÊNCIA PRÉ-CONCLUÍDA*\n\n"
                                 "🚥 *Semáforo:* $semaforoInfo\n"
                                 "👷 *Equipe:* $equipeNomes\n"
                                 "🔍 *defeito relatado:* $defeitoRelatado\n"
@@ -995,35 +1160,25 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
 
                             List<XFile> arquivosParaCompartilhar = [];
                             if (kIsWeb) {
-                              for (int i = 0;
-                                  i < fotosSelecionadas.length;
-                                  i++) {
+                              for (int i = 0; i < fotosSelecionadas.length; i++) {
                                 arquivosParaCompartilhar.add(XFile.fromData(
                                     fotosSelecionadas[i],
                                     mimeType: 'image/png',
-                                    name: 'foto_${docId}_$i.png'));
+                                    name: 'foto_${docId}_${DateTime.now().millisecondsSinceEpoch}_$i.png'));
                               }
                             } else {
-                              final tempDir = Directory.systemTemp;
-                              for (int i = 0;
-                                  i < fotosSelecionadas.length;
-                                  i++) {
-                                final file = File(
-                                    '${tempDir.path}/foto_${docId}_${DateTime.now().millisecondsSinceEpoch}_$i.png');
-                                await file.writeAsBytes(
-                                    fotosSelecionadas[i],
-                                    flush: true);
-                                arquivosParaCompartilhar
-                                    .add(XFile(file.path));
+                              final tempDir = await getTemporaryDirectory();
+                              for (int i = 0; i < fotosSelecionadas.length; i++) {
+                                final file = File('${tempDir.path}/foto_${docId}_${DateTime.now().millisecondsSinceEpoch}_$i.png');
+                                await file.writeAsBytes(fotosSelecionadas[i], flush: true);
+                                arquivosParaCompartilhar.add(XFile(file.path));
                               }
                             }
 
                             if (context.mounted) Navigator.pop(context);
 
                             if (arquivosParaCompartilhar.isNotEmpty) {
-                              await Share.shareXFiles(
-                                  arquivosParaCompartilhar,
-                                  text: mensagem);
+                              await Share.shareXFiles(arquivosParaCompartilhar, text: mensagem);
                             } else {
                               await Share.share(mensagem);
                             }
@@ -1031,9 +1186,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                             setStateModal(() => estaSalvando = false);
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                      content: Text('Erro ao enviar: $e'),
-                                      backgroundColor: Colors.red));
+                                  SnackBar(content: Text('Erro ao enviar: $e'), backgroundColor: Colors.red));
                             }
                           }
                         },
@@ -1154,8 +1307,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                         child: ConstrainedBox(
                           constraints: BoxConstraints(
                               maxHeight: 200,
-                              maxWidth:
-                                  MediaQuery.of(context).size.width - 48),
+                              maxWidth: MediaQuery.of(context).size.width - 48),
                           child: ListView.builder(
                             padding: EdgeInsets.zero,
                             shrinkWrap: true,
@@ -1268,8 +1420,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                                           isEqualTo: falhaFinal)
                                       .get();
 
-                              bool existeAtiva =
-                                  duplicatas.docs.any((docSnap) {
+                              bool existeAtiva = duplicatas.docs.any((docSnap) {
                                 if (docId != null && docSnap.id == docId) {
                                   return false;
                                 }
@@ -1323,13 +1474,11 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                               if (docId == null) {
                                 String numOcorrencia =
                                     await _gerarNumeroOcorrencia();
-                                payload['numero_da_ocorrencia'] =
-                                    numOcorrencia;
+                                payload['numero_da_ocorrencia'] = numOcorrencia;
                                 payload['status'] = 'Aberto';
                                 payload['data_de_abertura'] =
                                     FieldValue.serverTimestamp();
-                                payload['endereco'] =
-                                    semInfo['endereco'] ?? '';
+                                payload['endereco'] = semInfo['endereco'] ?? '';
                                 payload['bairro'] = semInfo['bairro'] ?? '';
                                 payload['usuario_abertura'] = nomeUsuario;
                                 await FirebaseFirestore.instance
@@ -1348,8 +1497,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
-                                        content:
-                                            Text('Erro ao salvar: $e')));
+                                        content: Text('Erro ao salvar: $e')));
                               }
                             } finally {
                               if (mounted) {
@@ -1377,236 +1525,6 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // ALTERADO: Abre foto em tela cheia para visualização detalhada pela central
-  // ─────────────────────────────────────────────────────────────────────────
-  void _abrirFotoTelaCheia(BuildContext context, List<dynamic> fotos, int indiceInicial) {
-    showDialog(
-      context: context,
-      barrierColor: Colors.black87,
-      builder: (ctx) {
-        int indiceAtual = indiceInicial;
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            String fotoStr = fotos[indiceAtual].toString();
-            Widget imagemWidget = fotoStr.startsWith('http')
-                ? Image.network(fotoStr, fit: BoxFit.contain)
-                : Image.memory(base64Decode(fotoStr), fit: BoxFit.contain);
-
-            return Dialog(
-              backgroundColor: Colors.black,
-              insetPadding: const EdgeInsets.all(8),
-              child: Stack(
-                children: [
-                  // Imagem com scroll/zoom
-                  InteractiveViewer(
-                    minScale: 0.5,
-                    maxScale: 5.0,
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: MediaQuery.of(ctx).size.height * 0.85,
-                      child: imagemWidget,
-                    ),
-                  ),
-                  // Contador e botão fechar
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            '${indiceAtual + 1} / ${fotos.length}',
-                            style: const TextStyle(color: Colors.white, fontSize: 13),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        GestureDetector(
-                          onTap: () => Navigator.pop(ctx),
-                          child: const CircleAvatar(
-                            radius: 16,
-                            backgroundColor: Colors.red,
-                            child: Icon(Icons.close, size: 18, color: Colors.white),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Seta anterior
-                  if (indiceAtual > 0)
-                    Positioned(
-                      left: 4,
-                      top: 0,
-                      bottom: 0,
-                      child: Center(
-                        child: GestureDetector(
-                          onTap: () => setDialogState(() => indiceAtual--),
-                          child: Container(
-                            decoration: const BoxDecoration(
-                              color: Colors.black45,
-                              shape: BoxShape.circle,
-                            ),
-                            padding: const EdgeInsets.all(8),
-                            child: const Icon(Icons.chevron_left, color: Colors.white, size: 32),
-                          ),
-                        ),
-                      ),
-                    ),
-                  // Seta próxima
-                  if (indiceAtual < fotos.length - 1)
-                    Positioned(
-                      right: 4,
-                      top: 0,
-                      bottom: 0,
-                      child: Center(
-                        child: GestureDetector(
-                          onTap: () => setDialogState(() => indiceAtual++),
-                          child: Container(
-                            decoration: const BoxDecoration(
-                              color: Colors.black45,
-                              shape: BoxShape.circle,
-                            ),
-                            padding: const EdgeInsets.all(8),
-                            child: const Icon(Icons.chevron_right, color: Colors.white, size: 32),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // ALTERADO: Seção de fotos da equipe destacada com aviso e miniaturas clicáveis
-  // ─────────────────────────────────────────────────────────────────────────
-  Widget _buildFotosEquipe(BuildContext context, Map<String, dynamic> dados) {
-    final List<dynamic> fotos = dados['fotos_finalizacao'] as List? ?? [];
-    if (fotos.isEmpty) {
-      return Container(
-        margin: const EdgeInsets.only(bottom: 16),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.orange.shade50,
-          border: Border.all(color: Colors.orange.shade300),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.orange),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'A equipe não anexou fotos nesta ocorrência.',
-                style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Banner de aviso destacado
-        Container(
-          width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Colors.teal.shade700, Colors.teal.shade400],
-            ),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.photo_camera, color: Colors.white, size: 22),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      '📸 FOTOS ENVIADAS PELA EQUIPE',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                          letterSpacing: 0.5),
-                    ),
-                    Text(
-                      '${fotos.length} foto(s) — toque para ampliar',
-                      style: const TextStyle(color: Colors.white70, fontSize: 11),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        // Grade de miniaturas clicáveis
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: fotos.asMap().entries.map((entry) {
-            int idx = entry.key;
-            String fotoStr = entry.value.toString();
-            Widget thumb;
-            try {
-              thumb = fotoStr.startsWith('http')
-                  ? Image.network(fotoStr, width: 90, height: 90, fit: BoxFit.cover)
-                  : Image.memory(base64Decode(fotoStr), width: 90, height: 90, fit: BoxFit.cover);
-            } catch (_) {
-              thumb = Container(
-                width: 90,
-                height: 90,
-                color: Colors.grey.shade200,
-                child: const Icon(Icons.broken_image, color: Colors.grey),
-              );
-            }
-
-            return GestureDetector(
-              onTap: () => _abrirFotoTelaCheia(context, fotos, idx),
-              child: Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: thumb,
-                  ),
-                  // Ícone de zoom sobre a miniatura
-                  Positioned(
-                    bottom: 4,
-                    right: 4,
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Icon(Icons.zoom_in, color: Colors.white, size: 14),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }).toList(),
-        ),
-        const SizedBox(height: 16),
-      ],
-    );
-  }
-
   void _abrirModalFinalizar(String docId, Map<String, dynamic> dados) {
     bool defeitoConstatado = true;
     if (dados['falha_aparente_final'] == 'DEFEITO NÃO CONSTATADO') {
@@ -1614,6 +1532,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
     }
 
     bool estaSalvando = false;
+    bool estaArrastandoArea = false;
 
     String falha = dados['falha_aparente_final'] ?? dados['tipo_da_falha'] ?? '';
     if (falha == 'DEFEITO NÃO CONSTATADO') {
@@ -1671,7 +1590,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                       style: const TextStyle(fontSize: 12)),
                 ),
 
-                // ── ALTERADO: Seção de fotos da equipe destacada ──
+                // ── Seção de fotos da equipe destacada ──
                 _buildFotosEquipe(context, dados),
 
                 // ── Switch defeito ──
@@ -1843,11 +1762,11 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                               height: 100,
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(8),
-                                border:
-                                    Border.all(color: Colors.grey.shade300),
+                                border: Border.all(
+                                    color: Colors.grey.shade300),
                                 image: DecorationImage(
-                                    image:
-                                        MemoryImage(fotosSelecionadas[index]),
+                                    image: MemoryImage(
+                                        fotosSelecionadas[index]),
                                     fit: BoxFit.cover),
                               ),
                             ),
@@ -1855,8 +1774,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                               top: 2,
                               right: 10,
                               child: GestureDetector(
-                                onTap: () => setStateModal(
-                                    () => fotosSelecionadas.removeAt(index)),
+                                onTap: () => setStateModal(() =>
+                                    fotosSelecionadas.removeAt(index)),
                                 child: const CircleAvatar(
                                     radius: 12,
                                     backgroundColor: Colors.red,
@@ -1881,7 +1800,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                             : () async {
                                 final XFile? foto = await _picker.pickImage(
                                     source: ImageSource.camera,
-                                    imageQuality: 60);
+                                    imageQuality: 40);
                                 if (foto != null) {
                                   Uint8List bytes = await foto.readAsBytes();
                                   Uint8List carimbada =
@@ -1902,9 +1821,11 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                             : () async {
                                 final List<XFile> fotos =
                                     await _picker.pickMultiImage(
-                                        imageQuality: 60);
+                                        imageQuality: 40);
                                 for (var foto in fotos) {
-                                  if (fotosSelecionadas.length >= 4) break;
+                                  if (fotosSelecionadas.length >= 4) {
+                                    break;
+                                  }
                                   Uint8List bytes = await foto.readAsBytes();
                                   Uint8List carimbada =
                                       await _adicionarCarimboNaFoto(bytes);
@@ -1916,6 +1837,83 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                if (fotosSelecionadas.length < 4)
+                  DropTarget(
+                    onDragEntered: (detail) =>
+                        setStateModal(() => estaArrastandoArea = true),
+                    onDragExited: (detail) =>
+                        setStateModal(() => estaArrastandoArea = false),
+                    onDragDone: (detail) async {
+                      setStateModal(() => estaArrastandoArea = false);
+                      for (var file in detail.files) {
+                        if (fotosSelecionadas.length >= 4) break;
+                        if (file.mimeType?.startsWith('image/') ?? true) {
+                          Uint8List bytes = await file.readAsBytes();
+                          Uint8List carimbada =
+                              await _adicionarCarimboNaFoto(bytes);
+                          setStateModal(
+                              () => fotosSelecionadas.add(carimbada));
+                        }
+                      }
+                    },
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () async {
+                          final List<XFile> fotos =
+                              await _picker.pickMultiImage(imageQuality: 40);
+                          for (var foto in fotos) {
+                            if (fotosSelecionadas.length >= 4) break;
+                            Uint8List bytes = await foto.readAsBytes();
+                            Uint8List carimbada =
+                                await _adicionarCarimboNaFoto(bytes);
+                            setStateModal(
+                                () => fotosSelecionadas.add(carimbada));
+                          }
+                        },
+                        child: Container(
+                          height: 90,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: estaArrastandoArea
+                                ? Colors.green.withValues(alpha: 0.1)
+                                : Colors.grey.shade50,
+                            border: Border.all(
+                                color: estaArrastandoArea
+                                    ? Colors.green
+                                    : Colors.grey.shade300,
+                                width: 2),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.cloud_upload,
+                                    color: estaArrastandoArea
+                                        ? Colors.green
+                                        : Colors.blueGrey,
+                                    size: 28),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Ou arraste as imagens e solte aqui\n(Clique para abrir a galeria)',
+                                  style: TextStyle(
+                                      color: estaArrastandoArea
+                                          ? Colors.green
+                                          : Colors.blueGrey,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 16),
 
                 // ── Botão finalizar ──
@@ -1945,10 +1943,9 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                           setStateModal(() => estaSalvando = true);
 
                           try {
-                            List<String> novasFotosUrls = [];
-                            if (fotosSelecionadas.isNotEmpty) {
-                              novasFotosUrls = await _uploadFotos(
-                                  fotosSelecionadas, docId, 'fim');
+                            List<String> novasFotosBase64 = [];
+                            for (var fotoBytes in fotosSelecionadas) {
+                              novasFotosBase64.add(base64Encode(fotoBytes));
                             }
 
                             String nomeUsuario = await _getNomeUsuario();
@@ -1965,14 +1962,12 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                               'usuario_finalizacao': nomeUsuario,
                             };
 
-                            // ── Mescla fotos da equipe + novas da central ──
                             List<dynamic> fotosFinais = [];
                             if (dados['fotos_finalizacao'] != null) {
-                              fotosFinais
-                                  .addAll(dados['fotos_finalizacao']);
+                              fotosFinais.addAll(dados['fotos_finalizacao']);
                             }
-                            if (novasFotosUrls.isNotEmpty) {
-                              fotosFinais.addAll(novasFotosUrls);
+                            if (novasFotosBase64.isNotEmpty) {
+                              fotosFinais.addAll(novasFotosBase64);
                             }
 
                             if (fotosFinais.isNotEmpty) {
@@ -2069,7 +2064,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                           style: const TextStyle(
                               fontWeight: FontWeight.bold)),
                       subtitle: Text(ints,
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
                       trailing: const Icon(Icons.check_circle_outline,
                           color: Colors.green),
                       onTap: () async {
@@ -2109,8 +2105,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
               onPressed: () => Navigator.pop(context, false),
               child: const Text('Cancelar')),
           ElevatedButton(
-            style:
-                ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Confirmar',
                 style: TextStyle(color: Colors.white)),
@@ -2209,6 +2205,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                     data['equipe_responsavel'] ??
                     'Nenhuma'),
             const SizedBox(height: 15),
+            
             if (!isEquipeLogada || ehDessaEquipe) ...[
               if (st.contains('atendimento')) ...[
                 if (isEquipeLogada)
@@ -3664,8 +3661,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                                     right: 16,
                                     left: isDesktop ? 0 : 16),
                                 decoration: BoxDecoration(
-                                    color:
-                                        Colors.black.withValues(alpha: 0.5),
+                                    color: Colors.black
+                                        .withValues(alpha: 0.5),
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
                                         color: Colors.white24)),
@@ -3701,8 +3698,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                                     right: 16,
                                     left: isDesktop ? 0 : 16),
                                 decoration: BoxDecoration(
-                                    color:
-                                        Colors.black.withValues(alpha: 0.5),
+                                    color: Colors.black
+                                        .withValues(alpha: 0.5),
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
                                         color: Colors.white24)),
