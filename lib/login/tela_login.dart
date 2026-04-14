@@ -28,7 +28,7 @@ class _TelaLoginState extends State<TelaLogin> {
     super.dispose();
   }
 
-  // --- LÓGICA DE LOGIN COM USUÁRIO ---
+// --- LÓGICA DE LOGIN COM USUÁRIO ---
   Future<void> _fazerLogin() async {
     if (_formKey.currentState!.validate()) {
       setState(() { _estaACaregar = true; });
@@ -55,10 +55,10 @@ class _TelaLoginState extends State<TelaLogin> {
         // 2. Se achou, pega o e-mail real atrelado a ele no banco
         String emailDoUsuario = snapshot.docs.first.data()['email'];
 
-        // 3. Faz o login no Firebase Auth usando o e-mail e a senha
+        // 3. Faz o login no Firebase Auth usando o e-mail e a senha (CORRIGIDO AQUI)
         await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: emailDoUsuario,
-          password: _senhaController.text,
+          password: _senhaController.text, 
         );
 
         if (mounted) {
@@ -71,13 +71,18 @@ class _TelaLoginState extends State<TelaLogin> {
         String mensagemErro = 'Erro ao fazer login. Verifique seus dados.';
         if (e.code == 'invalid-credential' || e.code == 'wrong-password') {
           mensagemErro = 'Senha incorreta.';
+        } else if (e.code == 'user-not-found') {
+          mensagemErro = 'Usuário não encontrado.';
         }
+        
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensagemErro), backgroundColor: Colors.red));
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro inesperado. Tente novamente.'), backgroundColor: Colors.red));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Erro: Não foi possível acessar o banco de dados. Verifique sua internet.'), backgroundColor: Colors.red)
+          );
         }
       } finally {
         if (mounted) {
@@ -86,7 +91,6 @@ class _TelaLoginState extends State<TelaLogin> {
       }
     }
   }
-
   // --- LÓGICA DE ESQUECI A SENHA ---
   void _mostrarDialogoEsqueciSenha() {
     final resetEmailController = TextEditingController();
