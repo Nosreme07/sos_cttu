@@ -10,6 +10,9 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+// IMPORTAÇÃO DO MENU (LOGOUT E PERFIL)
+import '../../widgets/menu_usuario.dart';
+
 class RelatoriosPage extends StatefulWidget {
   const RelatoriosPage({super.key});
 
@@ -583,6 +586,8 @@ class _RelatoriosPageState extends State<RelatoriosPage> with SingleTickerProvid
       appBar: AppBar(
         title: const Text('Relatórios e Exportações', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.blue.shade500,
+        foregroundColor: Colors.white,
+        actions: const [MenuUsuario()], // MENU ADICIONADO AQUI
         bottom: TabBar(
           controller: _tabController, labelColor: Colors.white, unselectedLabelColor: Colors.white60, indicatorColor: Colors.white,
           tabs: const [ Tab(icon: Icon(Icons.list_alt), text: 'Consulta'), Tab(icon: Icon(Icons.download), text: 'Exportação'), Tab(icon: Icon(Icons.warning_amber_rounded), text: 'Pendências') ],

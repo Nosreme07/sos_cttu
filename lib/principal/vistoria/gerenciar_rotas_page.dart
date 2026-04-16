@@ -6,7 +6,10 @@ import 'package:share_plus/share_plus.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:excel/excel.dart' as excel_pkg; // Para exportação XLSX
+import 'package:excel/excel.dart' as excel_pkg;
+
+// IMPORT DO MENU DE USUÁRIO (PERFIL/LOGOUT)
+import '../../widgets/menu_usuario.dart';
 
 class GerenciarRotasPage extends StatefulWidget {
   const GerenciarRotasPage({super.key});
@@ -42,6 +45,7 @@ class _GerenciarRotasPageState extends State<GerenciarRotasPage> {
         title: const Text('Gerenciar Rotas', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.purple.shade500,
         foregroundColor: Colors.white,
+        actions: const [MenuUsuario()], // MENU ADICIONADO AQUI
       ),
       body: Column(
         children: [
@@ -169,7 +173,7 @@ class _GerenciarRotasPageState extends State<GerenciarRotasPage> {
                           child: const Icon(Icons.route, color: Colors.purple),
                         ),
                         title: Text('Rota $rota', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                        subtitle: const Text('Organizar ordem'),
+                        subtitle: const Text('Organizar ordem nas abas Lado A e Lado B'),
                         trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
                         onTap: () {
                           Navigator.push(
@@ -200,16 +204,23 @@ class DetalheRotaPage extends StatefulWidget {
   State<DetalheRotaPage> createState() => _DetalheRotaPageState();
 }
 
-class _DetalheRotaPageState extends State<DetalheRotaPage> {
+class _DetalheRotaPageState extends State<DetalheRotaPage> with SingleTickerProviderStateMixin {
   bool _isLoading = true;
   bool _isSaving = false;
-  List<Map<String, dynamic>> _semaforos = [];
+  
+  // Listas separadas para as abas
+  List<Map<String, dynamic>> _semaforosLadoA = [];
+  List<Map<String, dynamic>> _semaforosLadoB = [];
+  
   final TextEditingController _buscaController = TextEditingController();
   String _termoBusca = '';
+
+  late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _carregarSemaforosDaRota();
     _buscaController.addListener(() => setState(() => _termoBusca = _buscaController.text.toLowerCase()));
   }
@@ -217,6 +228,7 @@ class _DetalheRotaPageState extends State<DetalheRotaPage> {
   @override
   void dispose() {
     _buscaController.dispose();
+    _tabController.dispose();
     super.dispose();
   }
 
@@ -227,26 +239,35 @@ class _DetalheRotaPageState extends State<DetalheRotaPage> {
           .where('rota', isEqualTo: widget.rotaNumero)
           .get();
 
-      List<Map<String, dynamic>> lista = query.docs.map((doc) {
+      List<Map<String, dynamic>> listaA = [];
+      List<Map<String, dynamic>> listaB = [];
+
+      for (var doc in query.docs) {
         var data = doc.data();
-        
-        // AJUSTE: ID com 3 dígitos (001, 050, 150)
         String rawId = data['id']?.toString() ?? '0';
         String numeroSemaforo = rawId.padLeft(3, '0');
         
-        return {
+        var semaforoFormatado = {
           'db_id': doc.id,
           'numero': numeroSemaforo,
           'endereco': data['endereco'] ?? data['cruzamento'] ?? 'Sem endereço',
           'ordem': data['ordem_vistoria'] ?? 999,
           'lado': data['lado_vistoria'] ?? 'A', 
         };
-      }).toList();
 
-      lista.sort((a, b) => (a['ordem'] as int).compareTo(b['ordem'] as int));
+        if (semaforoFormatado['lado'] == 'B') {
+          listaB.add(semaforoFormatado);
+        } else {
+          listaA.add(semaforoFormatado);
+        }
+      }
+
+      listaA.sort((a, b) => (a['ordem'] as int).compareTo(b['ordem'] as int));
+      listaB.sort((a, b) => (a['ordem'] as int).compareTo(b['ordem'] as int));
 
       setState(() {
-        _semaforos = lista;
+        _semaforosLadoA = listaA;
+        _semaforosLadoB = listaB;
         _isLoading = false;
       });
     } catch (e) {
@@ -254,21 +275,56 @@ class _DetalheRotaPageState extends State<DetalheRotaPage> {
     }
   }
 
-  List<Map<String, dynamic>> get _semaforosExibidos {
-    if (_termoBusca.isEmpty) return _semaforos;
-    return _semaforos.where((s) {
-      final numero = s['numero'].toString().toLowerCase();
-      final endereco = s['endereco'].toString().toLowerCase();
-      return numero.contains(_termoBusca) || endereco.contains(_termoBusca);
+  // Retorna os semáforos da aba A filtrados
+  List<Map<String, dynamic>> get _semaforosAExibidos {
+    if (_termoBusca.isEmpty) return _semaforosLadoA;
+    return _semaforosLadoA.where((s) {
+      return s['numero'].toString().toLowerCase().contains(_termoBusca) || 
+             s['endereco'].toString().toLowerCase().contains(_termoBusca);
     }).toList();
   }
 
-  void _onReorder(int oldIndex, int newIndex) {
+  // Retorna os semáforos da aba B filtrados
+  List<Map<String, dynamic>> get _semaforosBExibidos {
+    if (_termoBusca.isEmpty) return _semaforosLadoB;
+    return _semaforosLadoB.where((s) {
+      return s['numero'].toString().toLowerCase().contains(_termoBusca) || 
+             s['endereco'].toString().toLowerCase().contains(_termoBusca);
+    }).toList();
+  }
+
+  void _onReorderLadoA(int oldIndex, int newIndex) {
     if (_termoBusca.isNotEmpty) return; 
     setState(() {
       if (newIndex > oldIndex) newIndex -= 1;
-      final item = _semaforos.removeAt(oldIndex);
-      _semaforos.insert(newIndex, item);
+      final item = _semaforosLadoA.removeAt(oldIndex);
+      _semaforosLadoA.insert(newIndex, item);
+    });
+  }
+
+  void _onReorderLadoB(int oldIndex, int newIndex) {
+    if (_termoBusca.isNotEmpty) return; 
+    setState(() {
+      if (newIndex > oldIndex) newIndex -= 1;
+      final item = _semaforosLadoB.removeAt(oldIndex);
+      _semaforosLadoB.insert(newIndex, item);
+    });
+  }
+
+  // Mudar o lado (A -> B ou B -> A)
+  void _mudarLadoDoSemaforo(Map<String, dynamic> item, String novoLado) {
+    if (item['lado'] == novoLado) return;
+
+    setState(() {
+      if (novoLado == 'B') {
+        _semaforosLadoA.remove(item);
+        item['lado'] = 'B';
+        _semaforosLadoB.add(item);
+      } else {
+        _semaforosLadoB.remove(item);
+        item['lado'] = 'A';
+        _semaforosLadoA.add(item);
+      }
     });
   }
 
@@ -276,12 +332,23 @@ class _DetalheRotaPageState extends State<DetalheRotaPage> {
     setState(() => _isSaving = true);
     try {
       WriteBatch batch = FirebaseFirestore.instance.batch();
-      for (int i = 0; i < _semaforos.length; i++) {
-        var item = _semaforos[i];
+      
+      // Salva a ordem do Lado A
+      for (int i = 0; i < _semaforosLadoA.length; i++) {
+        var item = _semaforosLadoA[i];
         var ref = FirebaseFirestore.instance.collection('semaforos').doc(item['db_id']);
-        batch.update(ref, {'ordem_vistoria': i + 1, 'lado_vistoria': item['lado']});
+        batch.update(ref, {'ordem_vistoria': i + 1, 'lado_vistoria': 'A'});
       }
+
+      // Salva a ordem do Lado B
+      for (int i = 0; i < _semaforosLadoB.length; i++) {
+        var item = _semaforosLadoB[i];
+        var ref = FirebaseFirestore.instance.collection('semaforos').doc(item['db_id']);
+        batch.update(ref, {'ordem_vistoria': i + 1, 'lado_vistoria': 'B'});
+      }
+
       await batch.commit();
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Salvo com sucesso!'), backgroundColor: Colors.green));
         setState(() => _isSaving = false); 
@@ -292,10 +359,10 @@ class _DetalheRotaPageState extends State<DetalheRotaPage> {
   }
 
   // ==========================================
-  // EXPORTAÇÃO PDF (CENTRALIZADO)
+  // EXPORTAÇÃO PDF (CENTRALIZADO E DIVIDIDO POR LADO)
   // ==========================================
   Future<void> _exportarPDF() async {
-    if (_semaforos.isEmpty) return;
+    if (_semaforosLadoA.isEmpty && _semaforosLadoB.isEmpty) return;
     try {
       final pdf = pw.Document();
       String dataHoraAtual = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
@@ -313,30 +380,55 @@ class _DetalheRotaPageState extends State<DetalheRotaPage> {
             )
           ),
           build: (pw.Context context) {
-            return [
+            List<pw.Widget> elementos = [
               pw.Header(level: 0, child: pw.Text('Ordem de Vistoria - Rota ${widget.rotaNumero}', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold))),
               pw.SizedBox(height: 16),
-              pw.TableHelper.fromTextArray(
-                context: context,
-                headers: ['Ordem', 'Lado', 'Semáforo', 'Endereço/Cruzamento'],
-                data: _semaforos.asMap().entries.map((entry) => [
-                  '${entry.key + 1}º', 
-                  entry.value['lado'], 
-                  entry.value['numero'], 
-                  entry.value['endereco']
-                ]).toList(),
-                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 11),
-                headerDecoration: const pw.BoxDecoration(color: PdfColors.purple700),
-                cellAlignment: pw.Alignment.center, 
-                cellStyle: const pw.TextStyle(fontSize: 10),
-                columnWidths: {
-                  0: const pw.FlexColumnWidth(1),
-                  1: const pw.FlexColumnWidth(1),
-                  2: const pw.FlexColumnWidth(1.5),
-                  3: const pw.FlexColumnWidth(4),
-                }
-              ),
             ];
+
+            if (_semaforosLadoA.isNotEmpty) {
+              elementos.addAll([
+                pw.Text('LADO A', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColors.blue800)),
+                pw.SizedBox(height: 8),
+                pw.TableHelper.fromTextArray(
+                  context: context,
+                  headers: ['Ordem', 'Semáforo', 'Endereço/Cruzamento'],
+                  data: _semaforosLadoA.asMap().entries.map((entry) => [
+                    '${entry.key + 1}º', 
+                    entry.value['numero'], 
+                    entry.value['endereco']
+                  ]).toList(),
+                  headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 11),
+                  headerDecoration: const pw.BoxDecoration(color: PdfColors.purple700),
+                  cellAlignment: pw.Alignment.center, 
+                  cellStyle: const pw.TextStyle(fontSize: 10),
+                  columnWidths: { 0: const pw.FlexColumnWidth(1), 1: const pw.FlexColumnWidth(1.5), 2: const pw.FlexColumnWidth(4) }
+                ),
+                pw.SizedBox(height: 24),
+              ]);
+            }
+
+            if (_semaforosLadoB.isNotEmpty) {
+              elementos.addAll([
+                pw.Text('LADO B', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColors.blue800)),
+                pw.SizedBox(height: 8),
+                pw.TableHelper.fromTextArray(
+                  context: context,
+                  headers: ['Ordem', 'Semáforo', 'Endereço/Cruzamento'],
+                  data: _semaforosLadoB.asMap().entries.map((entry) => [
+                    '${entry.key + 1}º', 
+                    entry.value['numero'], 
+                    entry.value['endereco']
+                  ]).toList(),
+                  headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 11),
+                  headerDecoration: const pw.BoxDecoration(color: PdfColors.purple700),
+                  cellAlignment: pw.Alignment.center, 
+                  cellStyle: const pw.TextStyle(fontSize: 10),
+                  columnWidths: { 0: const pw.FlexColumnWidth(1), 1: const pw.FlexColumnWidth(1.5), 2: const pw.FlexColumnWidth(4) }
+                ),
+              ]);
+            }
+
+            return elementos;
           }
         )
       );
@@ -347,10 +439,10 @@ class _DetalheRotaPageState extends State<DetalheRotaPage> {
   }
 
   // ==========================================
-  // EXPORTAÇÃO XLSX (REAL EXCEL) COM CORREÇÃO
+  // EXPORTAÇÃO XLSX (REAL EXCEL)
   // ==========================================
   Future<void> _exportarExcel() async {
-    if (_semaforos.isEmpty) return;
+    if (_semaforosLadoA.isEmpty && _semaforosLadoB.isEmpty) return;
     try {
       var excel = excel_pkg.Excel.createExcel();
       String sheetName = "Rota ${widget.rotaNumero}";
@@ -364,11 +456,23 @@ class _DetalheRotaPageState extends State<DetalheRotaPage> {
         excel_pkg.TextCellValue('ENDERECO'),
       ]);
 
-      for (int i = 0; i < _semaforos.length; i++) {
-        var item = _semaforos[i];
+      // Exporta Lado A
+      for (int i = 0; i < _semaforosLadoA.length; i++) {
+        var item = _semaforosLadoA[i];
         sheet.appendRow([
           excel_pkg.TextCellValue('${i + 1}º'),
-          excel_pkg.TextCellValue(item['lado']?.toString() ?? ''),
+          excel_pkg.TextCellValue('A'),
+          excel_pkg.TextCellValue(item['numero']?.toString() ?? ''),
+          excel_pkg.TextCellValue(item['endereco']?.toString() ?? ''),
+        ]);
+      }
+
+      // Exporta Lado B
+      for (int i = 0; i < _semaforosLadoB.length; i++) {
+        var item = _semaforosLadoB[i];
+        sheet.appendRow([
+          excel_pkg.TextCellValue('${i + 1}º'),
+          excel_pkg.TextCellValue('B'),
           excel_pkg.TextCellValue(item['numero']?.toString() ?? ''),
           excel_pkg.TextCellValue(item['endereco']?.toString() ?? ''),
         ]);
@@ -395,6 +499,16 @@ class _DetalheRotaPageState extends State<DetalheRotaPage> {
         title: Text('Organizar Rota ${widget.rotaNumero}'),
         backgroundColor: Colors.purple.shade600,
         foregroundColor: Colors.white,
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white60,
+          indicatorColor: Colors.amber,
+          tabs: const [
+            Tab(text: 'LADO A', icon: Icon(Icons.format_list_numbered)),
+            Tab(text: 'LADO B', icon: Icon(Icons.format_list_numbered_rtl)),
+          ],
+        ),
         actions: [
           IconButton(icon: const Icon(Icons.picture_as_pdf), onPressed: _isLoading ? null : _exportarPDF),
           IconButton(icon: const Icon(Icons.download), onPressed: _isLoading ? null : _exportarExcel),
@@ -409,7 +523,7 @@ class _DetalheRotaPageState extends State<DetalheRotaPage> {
                 child: TextField(
                   controller: _buscaController,
                   decoration: InputDecoration(
-                    hintText: 'Pesquisar...',
+                    hintText: 'Pesquisar nesta rota...',
                     prefixIcon: const Icon(Icons.search, color: Colors.purple),
                     filled: true,
                     fillColor: Colors.white,
@@ -419,22 +533,42 @@ class _DetalheRotaPageState extends State<DetalheRotaPage> {
                 ),
               ),
               Expanded(
-                child: _termoBusca.isNotEmpty
-                  ? ListView.builder(
-                      padding: const EdgeInsets.only(left: 8, right: 8, bottom: 80),
-                      itemCount: _semaforosExibidos.length,
-                      itemBuilder: (context, index) => _buildSemaforoCard(_semaforosExibidos[index], true),
-                    )
-                  : ReorderableListView.builder(
-                      padding: const EdgeInsets.only(left: 8, right: 8, bottom: 80),
-                      itemCount: _semaforosExibidos.length,
-                      onReorder: _onReorder,
-                      itemBuilder: (context, index) => _buildSemaforoCard(_semaforosExibidos[index], false),
-                    ),
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    // ================= ABA LADO A =================
+                    _termoBusca.isNotEmpty
+                      ? ListView.builder(
+                          padding: const EdgeInsets.only(left: 8, right: 8, bottom: 80),
+                          itemCount: _semaforosAExibidos.length,
+                          itemBuilder: (context, index) => _buildSemaforoCard(_semaforosAExibidos[index], _semaforosLadoA, true),
+                        )
+                      : ReorderableListView.builder(
+                          padding: const EdgeInsets.only(left: 8, right: 8, bottom: 80),
+                          itemCount: _semaforosAExibidos.length,
+                          onReorder: _onReorderLadoA,
+                          itemBuilder: (context, index) => _buildSemaforoCard(_semaforosAExibidos[index], _semaforosLadoA, false),
+                        ),
+
+                    // ================= ABA LADO B =================
+                    _termoBusca.isNotEmpty
+                      ? ListView.builder(
+                          padding: const EdgeInsets.only(left: 8, right: 8, bottom: 80),
+                          itemCount: _semaforosBExibidos.length,
+                          itemBuilder: (context, index) => _buildSemaforoCard(_semaforosBExibidos[index], _semaforosLadoB, true),
+                        )
+                      : ReorderableListView.builder(
+                          padding: const EdgeInsets.only(left: 8, right: 8, bottom: 80),
+                          itemCount: _semaforosBExibidos.length,
+                          onReorder: _onReorderLadoB,
+                          itemBuilder: (context, index) => _buildSemaforoCard(_semaforosBExibidos[index], _semaforosLadoB, false),
+                        ),
+                  ],
+                ),
               ),
             ],
           ),
-      floatingActionButton: _isLoading || _semaforos.isEmpty ? null : FloatingActionButton.extended(
+      floatingActionButton: _isLoading ? null : FloatingActionButton.extended(
         onPressed: _isSaving ? null : _salvarOrganizacao,
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
@@ -444,8 +578,10 @@ class _DetalheRotaPageState extends State<DetalheRotaPage> {
     );
   }
 
-  Widget _buildSemaforoCard(Map<String, dynamic> item, bool bloqueadoParaArrastar) {
-    int indexReal = _semaforos.indexOf(item);
+  // O card precisa saber de qual lista original ele faz parte para calcular o índice corretamente
+  Widget _buildSemaforoCard(Map<String, dynamic> item, List<Map<String, dynamic>> listaOriginal, bool bloqueadoParaArrastar) {
+    int indexReal = listaOriginal.indexOf(item);
+    
     return Card(
       key: ValueKey(item['db_id']),
       elevation: 2,
@@ -468,7 +604,7 @@ class _DetalheRotaPageState extends State<DetalheRotaPage> {
                   value: item['lado'],
                   style: TextStyle(color: Colors.blue.shade800, fontWeight: FontWeight.bold),
                   items: ['A', 'B'].map((lado) => DropdownMenuItem(value: lado, child: Text('Lado $lado'))).toList(),
-                  onChanged: (novoLado) => setState(() => item['lado'] = novoLado!),
+                  onChanged: (novoLado) => _mudarLadoDoSemaforo(item, novoLado!),
                 ),
               ),
             ),

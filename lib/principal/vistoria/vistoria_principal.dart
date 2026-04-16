@@ -6,6 +6,9 @@ import 'formulario_rota_page.dart';
 import 'relatorios_page.dart'; 
 import 'gerenciar_rotas_page.dart'; // <-- NOVO IMPORT DA TELA DE ROTAS
 
+// IMPORTAÇÃO DO MENU (LOGOUT E PERFIL)
+import '../../widgets/menu_usuario.dart';
+
 class VistoriaPrincipal extends StatelessWidget {
   const VistoriaPrincipal({super.key});
 
@@ -16,6 +19,7 @@ class VistoriaPrincipal extends StatelessWidget {
         title: const Text('Menu de Vistoria', style: TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: true,
         backgroundColor: Colors.teal.shade200,
+        actions: const [MenuUsuario()], // MENU ADICIONADO AQUI
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),

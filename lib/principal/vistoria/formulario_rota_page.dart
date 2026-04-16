@@ -14,6 +14,9 @@ import 'package:printing/printing.dart';
 import 'package:image/image.dart' as img; 
 import 'package:url_launcher/url_launcher.dart'; 
 
+// IMPORTAÇÃO DO MENU (LOGOUT E PERFIL)
+import '../../widgets/menu_usuario.dart';
+
 class FormularioRotaPage extends StatefulWidget {
   const FormularioRotaPage({super.key});
 
@@ -1031,6 +1034,7 @@ class _FormularioRotaPageState extends State<FormularioRotaPage> with SingleTick
         title: const Text('Monitoramento de Rotas', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.orange.shade400,
         foregroundColor: Colors.white,
+        actions: const [MenuUsuario()], // MENU ADICIONADO AQUI
       ),
       body: Column(
         children: [
@@ -1219,6 +1223,7 @@ class _FormularioRotaPageState extends State<FormularioRotaPage> with SingleTick
         ) : null,
         title: Text(_isAdmin ? 'Vistoriando Rota $rotaNumero' : 'Vistoria em Campo', style: const TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.orange.shade300,
+        actions: const [MenuUsuario()], // MENU ADICIONADO AQUI
         bottom: TabBar(
           controller: _tabController,
           labelColor: Colors.black87,
@@ -1454,7 +1459,11 @@ class _FormularioRotaPageState extends State<FormularioRotaPage> with SingleTick
         
         if (!snapshotTurno.hasData || snapshotTurno.data!.docs.isEmpty) {
           return Scaffold(
-            appBar: AppBar(title: const Text('Vistoria em Campo'), backgroundColor: Colors.orange.shade300),
+            appBar: AppBar(
+              title: const Text('Vistoria em Campo'), 
+              backgroundColor: Colors.orange.shade300,
+              actions: const [MenuUsuario()], // MENU ADICIONADO AQUI
+            ),
             body: Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center, 
