@@ -81,7 +81,6 @@ class _FormularioRotaPageState extends State<FormularioRotaPage> with SingleTick
         
         if (mounted) {
           setState(() {
-            // VERIFICAÇÃO DE PERFIL ATUALIZADA
             _isAdmin = perfil.contains('admin') || perfil.contains('desenvolvedor') || perfil.contains('operador central');
             _nomeDoVistoriadorLogado = data['nome'] ?? data['nome_completo'] ?? user!.email?.split('@').first.toUpperCase() ?? 'Vistoriador';
             _carregandoPerfil = false;
@@ -194,6 +193,23 @@ class _FormularioRotaPageState extends State<FormularioRotaPage> with SingleTick
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao abrir o $app. Verifique se ele está instalado!'), backgroundColor: Colors.red));
     }
+  }
+
+  // ==== NOVO: GERAR NUMERO DA OCORRÊNCIA PARA A CENTRAL ====
+  Future<String> _gerarNumeroOcorrencia() async {
+    int anoAtual = DateTime.now().year;
+    DocumentReference contadorRef = FirebaseFirestore.instance.collection('contadores').doc('ocorrencias_$anoAtual');
+    return await FirebaseFirestore.instance.runTransaction((transaction) async {
+      DocumentSnapshot snapshot = await transaction.get(contadorRef);
+      int sequencia = 1;
+      if (snapshot.exists) {
+        sequencia = ((snapshot.data() as Map<String, dynamic>)['atual'] ?? 0) + 1;
+        transaction.update(contadorRef, {'atual': sequencia});
+      } else {
+        transaction.set(contadorRef, {'atual': 1});
+      }
+      return '$anoAtual-${sequencia.toString().padLeft(4, '0')}';
+    });
   }
 
   Future<void> _enviarOcorrencia(Map<String, dynamic> semaforo, String falha, String detalhes, List<File> fotosLocais) async {
@@ -446,9 +462,26 @@ class _FormularioRotaPageState extends State<FormularioRotaPage> with SingleTick
             
             Future<void> carregarFalhas() async {
               if (tiposDeFalhaLista.isEmpty) {
-                var snapshot = await FirebaseFirestore.instance.collection('tipos_falha').orderBy('falha').get();
+                // ==== AQUI FOI ALTERADA A COLEÇÃO PARA "falhas" ====
+                var snapshot = await FirebaseFirestore.instance.collection('falhas').get();
                 setModalState(() {
-                  tiposDeFalhaLista = snapshot.docs.map((doc) => {'id': doc.id, 'falha': doc['falha']}).toList();
+                  var listaTemp = snapshot.docs.map((doc) {
+                    var d = doc.data();
+                    return {
+                      'id': doc.id,
+                      'falha': (d['tipo_da_falha'] ?? d['falha'] ?? '').toString().toUpperCase(),
+                      'prazo': (d['prazo'] ?? '').toString(),
+                    };
+                  }).where((e) => e['falha'].toString().isNotEmpty).toList();
+                  
+                  // Remover duplicadas (evita que a mesma falha apareça duas vezes no dropdown)
+                  Map<String, Map<String, dynamic>> falhasUnicas = {};
+                  for (var item in listaTemp) {
+                    falhasUnicas[item['falha'] as String] = item;
+                  }
+                  
+                  tiposDeFalhaLista = falhasUnicas.values.toList();
+                  tiposDeFalhaLista.sort((a, b) => a['falha'].toString().compareTo(b['falha'].toString()));
                 });
               }
             }
@@ -598,7 +631,7 @@ class _FormularioRotaPageState extends State<FormularioRotaPage> with SingleTick
                                   isExpanded: true,
                                   decoration: const InputDecoration(labelText: 'Selecione a Falha Encontrada', border: OutlineInputBorder()),
                                   value: falhaSelecionada,
-                                  items: tiposDeFalhaLista.map((f) => DropdownMenuItem<String>(value: f['falha'], child: Text(f['falha'], overflow: TextOverflow.ellipsis))).toList(),
+                                  items: tiposDeFalhaLista.map((f) => DropdownMenuItem<String>(value: f['falha'].toString(), child: Text(f['falha'].toString(), overflow: TextOverflow.ellipsis))).toList(),
                                   onChanged: (val) => setModalState(() => falhaSelecionada = val),
                                 ),
                               
@@ -720,7 +753,8 @@ class _FormularioRotaPageState extends State<FormularioRotaPage> with SingleTick
 
                                     String dataFormatadaFim = DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now());
                                     
-                                    await FirebaseFirestore.instance.collection('vistorias').add({
+                                    // ==== SALVA NA COLEÇÃO VISTORIA NORMALMENTE ====
+                                    await FirebaseFirestore.instance.collection('vistoria').add({
                                       'turno_id': turnoId,
                                       'vistoriador_uid': user!.uid,
                                       'semaforo_id': semaforo['id'],
@@ -736,8 +770,35 @@ class _FormularioRotaPageState extends State<FormularioRotaPage> with SingleTick
                                       'criado_em': FieldValue.serverTimestamp(),
                                     });
 
-                                    // ==== COMPARTILHA PARA O WHATSAPP ====
+                                    // ==== SE TIVER DEFEITO: CRIA UMA NOVA OCORRÊNCIA OFICIAL PARA A CENTRAL ====
                                     if (temAnormalidade == 'Sim') {
+                                      String numOcorrencia = await _gerarNumeroOcorrencia();
+                                      
+                                      String prazoFalha = '';
+                                      try {
+                                        var falhaCadastrada = tiposDeFalhaLista.firstWhere((x) => x['falha'] == falhaSelecionada);
+                                        prazoFalha = falhaCadastrada['prazo'] ?? '';
+                                      } catch(_) {}
+
+                                      await FirebaseFirestore.instance.collection('Gerenciamento_ocorrencias').add({
+                                        'numero_da_ocorrencia': numOcorrencia,
+                                        'semaforo': semaforo['id'],
+                                        'endereco': semaforo['endereco'],
+                                        'bairro': semaforo['bairro'] ?? '',
+                                        'empresa_semaforo': semaforo['empresa'] ?? '',
+                                        'georeferencia': coordenadas, // Coordenada coletada pelo Vistoriador
+                                        'tipo_da_falha': falhaSelecionada,
+                                        'detalhes': detalhesFinais,
+                                        'origem_da_ocorrencia': 'VISTORIA TÉCNICA', // Marca fixa para saber de onde veio
+                                        'status': 'Aberto', // Cai na central como aberta
+                                        'data_de_abertura': FieldValue.serverTimestamp(),
+                                        'data_atualizacao': FieldValue.serverTimestamp(),
+                                        'usuario_abertura': _nomeDoVistoriadorLogado,
+                                        'fotos': urlsDasFotos, 
+                                        'prazo': prazoFalha,
+                                      });
+
+                                      // Compartilha para o WhatsApp avisando
                                       await _enviarOcorrencia(semaforo, falhaSelecionada!, detalhesFinais, fotos);
                                     }
 
@@ -1034,7 +1095,7 @@ class _FormularioRotaPageState extends State<FormularioRotaPage> with SingleTick
         title: const Text('Monitoramento de Rotas', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.orange.shade400,
         foregroundColor: Colors.white,
-        actions: const [MenuUsuario()], // MENU ADICIONADO AQUI
+        actions: const [MenuUsuario()],
       ),
       body: Column(
         children: [
@@ -1112,7 +1173,7 @@ class _FormularioRotaPageState extends State<FormularioRotaPage> with SingleTick
 
                         // Acessa as vistorias deste turno específico para fazer a barra de progresso
                         return StreamBuilder<QuerySnapshot>(
-                          stream: FirebaseFirestore.instance.collection('vistorias').where('turno_id', isEqualTo: doc.id).snapshots(),
+                          stream: FirebaseFirestore.instance.collection('vistoria').where('turno_id', isEqualTo: doc.id).snapshots(),
                           builder: (context, snapshotVistorias) {
                             int concluidos = snapshotVistorias.hasData ? snapshotVistorias.data!.docs.length : 0;
                             double percentual = meta == 0 ? 0.0 : (concluidos / meta);
@@ -1223,7 +1284,7 @@ class _FormularioRotaPageState extends State<FormularioRotaPage> with SingleTick
         ) : null,
         title: Text(_isAdmin ? 'Vistoriando Rota $rotaNumero' : 'Vistoria em Campo', style: const TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.orange.shade300,
-        actions: const [MenuUsuario()], // MENU ADICIONADO AQUI
+        actions: const [MenuUsuario()], 
         bottom: TabBar(
           controller: _tabController,
           labelColor: Colors.black87,
@@ -1241,7 +1302,7 @@ class _FormularioRotaPageState extends State<FormularioRotaPage> with SingleTick
           if (!snapshotSemaforo.hasData) return const Center(child: CircularProgressIndicator());
           
           return StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('vistorias').where('turno_id', isEqualTo: turnoDoc.id).snapshots(),
+            stream: FirebaseFirestore.instance.collection('vistoria').where('turno_id', isEqualTo: turnoDoc.id).snapshots(),
             builder: (context, snapshotVistoria) {
               if (!snapshotVistoria.hasData) return const Center(child: CircularProgressIndicator());
 
@@ -1462,7 +1523,7 @@ class _FormularioRotaPageState extends State<FormularioRotaPage> with SingleTick
             appBar: AppBar(
               title: const Text('Vistoria em Campo'), 
               backgroundColor: Colors.orange.shade300,
-              actions: const [MenuUsuario()], // MENU ADICIONADO AQUI
+              actions: const [MenuUsuario()],
             ),
             body: Center(
               child: Column(

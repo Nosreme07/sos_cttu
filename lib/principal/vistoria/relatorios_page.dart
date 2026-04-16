@@ -380,7 +380,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> with SingleTickerProvid
         csv += '${v['semaforo_id']};${v['nome_vistoriador'] ?? ''};${v['semaforo_endereco']};${v['data_hora_inicio']};${v['data_hora_fim']};${v['gps_coordenadas']};$status;${v['falha_registrada']};${v['detalhes_ocorrencia']?.toString().replaceAll('\n', ' ')};${(v['fotos'] ?? []).join(', ')}\n';
       }
       final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/Relatorio_Vistorias.xls';
+      final path = '${dir.path}/Relatorio_Vistorias.csv'; // Corrigido a extensão para .csv
       final file = File(path);
       await file.writeAsBytes(utf8.encode(csv));
       await Share.shareXFiles([XFile(path)], text: 'Planilha de Vistorias.');
@@ -390,7 +390,8 @@ class _RelatoriosPageState extends State<RelatoriosPage> with SingleTickerProvid
   }
 
   Future<void> _realizarExportacao(String tipoExportacao, Map<String, String> mapaRotas) async {
-    QuerySnapshot snapshot = await FirebaseFirestore.instance.collection('vistorias').where('criado_em', isGreaterThanOrEqualTo: _deExport).where('criado_em', isLessThanOrEqualTo: _ateExport).orderBy('criado_em', descending: true).get();
+    // ==== AQUI FOI ALTERADA A COLEÇÃO PARA "vistoria" ====
+    QuerySnapshot snapshot = await FirebaseFirestore.instance.collection('vistoria').where('criado_em', isGreaterThanOrEqualTo: _deExport).where('criado_em', isLessThanOrEqualTo: _ateExport).orderBy('criado_em', descending: true).get();
     List<Map<String, dynamic>> vistoriasFiltradas = [];
     String rotaSelecionadaLimpa = _rotaExport.replaceFirst(RegExp(r'^0+'), '');
 
@@ -471,7 +472,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> with SingleTickerProvid
         csv += 'Rota $rota;${statsPorRota[rota]!['omitidos']};${pendentesPorRota[rota]!.map((e) => e['id'].toString()).join(', ')}\n';
       }
       final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/Omissões_${mesFiltro.replaceAll('/', '-')}.xls');
+      final file = File('${dir.path}/Omissões_${mesFiltro.replaceAll('/', '-')}.csv'); // Corrigido a extensão
       await file.writeAsBytes(utf8.encode(csv));
       await Share.shareXFiles([XFile(file.path)], text: 'Lista de semáforos não vistoriados - $mesFiltro.');
     } catch (e) {
@@ -579,7 +580,8 @@ class _RelatoriosPageState extends State<RelatoriosPage> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
-    Query queryConsulta = FirebaseFirestore.instance.collection('vistorias').orderBy('criado_em', descending: true);
+    // ==== AQUI FOI ALTERADA A COLEÇÃO PARA "vistoria" ====
+    Query queryConsulta = FirebaseFirestore.instance.collection('vistoria').orderBy('criado_em', descending: true);
     if (_deConsulta != null && _ateConsulta != null) queryConsulta = queryConsulta.where('criado_em', isGreaterThanOrEqualTo: _deConsulta, isLessThanOrEqualTo: _ateConsulta);
 
     return Scaffold(
@@ -803,7 +805,8 @@ class _RelatoriosPageState extends State<RelatoriosPage> with SingleTickerProvid
                       
                       Expanded(
                         child: StreamBuilder<QuerySnapshot>(
-                          stream: FirebaseFirestore.instance.collection('vistorias')
+                          // ==== AQUI FOI ALTERADA A COLEÇÃO PARA "vistoria" ====
+                          stream: FirebaseFirestore.instance.collection('vistoria')
                             .where('criado_em', isGreaterThanOrEqualTo: DateTime(_mesPendencia.year, _mesPendencia.month, 1))
                             .where('criado_em', isLessThanOrEqualTo: DateTime(_mesPendencia.year, _mesPendencia.month + 1, 0, 23, 59, 59))
                             .snapshots(),

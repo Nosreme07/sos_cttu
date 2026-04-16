@@ -3341,7 +3341,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                         WidgetsBinding.instance
                             .addPostFrameCallback((_) async {
                           await _audioPlayer
-                              .play(AssetSource('audios/alerta.mp3'));
+                              .play(AssetSource('audios/notificacao.mp3'));
                           _mostrarAlertaNovaOcorrencia(nova);
                         });
                       }
@@ -3361,7 +3361,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                         WidgetsBinding.instance
                             .addPostFrameCallback((_) async {
                           await _audioPlayer
-                              .play(AssetSource('audios/alerta.mp3'));
+                              .play(AssetSource('audios/notificacao.mp3'));
                           ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                             content: Text(
@@ -3599,7 +3599,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                                                                   .grey)),
                                                       const SizedBox(height: 4),
                                                       DropdownButtonFormField<
-                                                          String>(
+                                                              String>(
                                                         isDense: true,
                                                         isExpanded: true,
                                                         style: const TextStyle(
