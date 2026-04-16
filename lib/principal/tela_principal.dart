@@ -9,6 +9,7 @@ import 'cadastros/tela_cadastro.dart';
 import 'dashboard/tela_dashboard.dart';
 import 'relatorios/tela_relatorios.dart';
 import 'programacao/tela_programacao.dart';
+import 'vistoria/vistoria_principal.dart'; // <-- NOVO IMPORT DA VISTORIA
 
 // Importamos as ocorrências com o apelido "oc" para acabar com o conflito!
 import 'ocorrencias/tela_ocorrencias.dart' as oc;
@@ -119,6 +120,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         
       case 'busca':
         return perfil.contains('operador central') || perfil.contains('callcenter') || perfil.contains('vistoriador') || perfil.contains('equipe tecnica');
+      
+      // Nova regra da Vistoria bloqueando Callcenter e Equipe  
+      case 'vistoria':
+        return perfil.contains('operador central') || perfil.contains('vistoriador');
         
       default:
         return false;
@@ -202,6 +207,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       if (_temAcesso('mapa'))
                         _buildCardWithImage(context, 'Mapa de\nOcorrências', 'assets/images/mapas.png', () {
                           Navigator.push(context, MaterialPageRoute(builder: (context) => const TelaMapaOcorrencias()));
+                        }),
+
+                      // <-- NOVO BOTÃO DA VISTORIA AQUI -->
+                      if (_temAcesso('vistoria'))
+                        _buildCardWithImage(context, 'Vistoria', 'assets/images/vistoria.png', () {
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => const VistoriaPrincipal()));
                         }),
                       
                       if (_temAcesso('relatorios'))

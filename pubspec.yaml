@@ -59,6 +59,9 @@ dependencies:
   latlong2: ^0.9.0
   # Criação de gráficos (Pizza, Barras, Linhas) para dashboards
   fl_chart: ^0.68.0
+  geolocator: ^14.0.2
+  path_provider: ^2.1.5
+  image: ^4.3.0
 
 dev_dependencies:
   flutter_test:
