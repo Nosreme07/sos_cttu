@@ -368,8 +368,6 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
 
   Future<Uint8List> _adicionarCarimboNaFoto(Uint8List imageBytes) async {
     try {
-      // COMPRESSÃO EXTREMA DE RESOLUÇÃO: 350px. 
-      // Isso garante que 4 fotos em PNG codificadas em Base64 não vão estourar o 1MB do Firestore!
       final codec = kIsWeb
           ? await ui.instantiateImageCodec(imageBytes)
           : await ui.instantiateImageCodec(imageBytes, targetWidth: 350);
@@ -609,7 +607,6 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
     );
   }
 
-  // Abre foto em tela cheia para visualização detalhada
   void _abrirFotoTelaCheia(BuildContext context, List<dynamic> fotos, int indiceInicial) {
     showDialog(
       context: context,
@@ -712,7 +709,6 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
     );
   }
 
-  // Seção de fotos da equipe destacada com aviso e miniaturas clicáveis
   Widget _buildFotosEquipe(BuildContext context, Map<String, dynamic> dados) {
     final List<dynamic> fotos = dados['fotos_finalizacao'] as List? ?? [];
     if (fotos.isEmpty) {
@@ -828,7 +824,6 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
     );
   }
 
-  // --- MODAL DE PRÉ-CONCLUSÃO DA EQUIPE ---
   void _abrirModalRelatoWhatsApp(String docId, Map<String, dynamic> data) {
     bool defeitoConstatado = true;
     final relatoCtrl = TextEditingController(text: data['relato_equipe'] ?? '');
@@ -1738,7 +1733,6 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                       ),
                     ),
                   ],
-                  const SizedBox(height: 16),
                 ],
 
                 // ── Fotos adicionais pela central ──
@@ -2151,6 +2145,11 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
       ehDessaEquipe = placaDoc == _placaEquipeLogada;
     }
 
+    // ==== LÓGICA DO RELÓGIO VERMELHO E ABERTURA ====
+    String prazo = _calcularPrazo(data['data_de_abertura'], data['prazo']);
+    bool estaFora = _estaForaDoPrazo(data['data_de_abertura'], data['prazo']);
+    String dataAberturaFmt = _formatarDataHoraCompleta(data['data_de_abertura']);
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -2198,8 +2197,53 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
             _buildInfoRow('Nº da ocorrência', data['numero_da_ocorrencia']),
             _buildInfoRow('Falha', data['tipo_da_falha']),
             _buildInfoRow('Detalhes', data['detalhes']),
-            _buildInfoRow('Prazo Limite',
-                _calcularPrazo(data['data_de_abertura'], data['prazo'])),
+            _buildInfoRow('Lançamento', dataAberturaFmt),
+            
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(
+                    width: 130,
+                    child: Text(
+                      'Prazo Limite:',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: Color(0xFF2c3e50)),
+                    ),
+                  ),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Text(
+                          prazo,
+                          style: TextStyle(
+                            fontSize: 13, 
+                            color: estaFora ? Colors.red : Colors.black87,
+                            fontWeight: estaFora ? FontWeight.bold : FontWeight.normal
+                          ),
+                        ),
+                        if (estaFora) ...[
+                          const SizedBox(width: 8),
+                          AnimatedBuilder(
+                            animation: _pulseAnimation,
+                            builder: (context, child) {
+                              return Transform.scale(
+                                scale: _pulseAnimation.value,
+                                child: const Icon(Icons.timer, color: Colors.red, size: 16),
+                              );
+                            }
+                          )
+                        ]
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            
             _buildInfoRow('Equipe atrelada',
                 data['equipe_atrelada'] ??
                     data['equipe_responsavel'] ??
@@ -2464,7 +2508,8 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                         ),
                         actions: [
                           TextButton(
-                              onPressed: () => Navigator.pop(ctx),
+                              onPressed: () =>
+                                  Navigator.pop(ctx),
                               child: const Text('Fechar',
                                   style: TextStyle(
                                       fontWeight: FontWeight.bold)))
@@ -3327,6 +3372,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                       _perfilLogado.contains('tecnica') ||
                       _perfilLogado.contains('técnica');
 
+                  // ==== SISTEMA DE ALERTAS SONOROS ====
                   if (isEquipeLogada) {
                     var novasAtribuidas = ocorrenciasParaMapa.where((doc) {
                       var d = doc.data() as Map<String, dynamic>;
@@ -3341,7 +3387,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                         WidgetsBinding.instance
                             .addPostFrameCallback((_) async {
                           await _audioPlayer
-                              .play(AssetSource('audios/notificacao.mp3'));
+                              .play(AssetSource('audios/alerta.mp3')); // TOCA PARA EQUIPE
                           _mostrarAlertaNovaOcorrencia(nova);
                         });
                       }
@@ -3361,7 +3407,7 @@ class _TelaMapaOcorrenciasState extends State<TelaMapaOcorrencias>
                         WidgetsBinding.instance
                             .addPostFrameCallback((_) async {
                           await _audioPlayer
-                              .play(AssetSource('audios/notificacao.mp3'));
+                              .play(AssetSource('audios/notificacao.mp3')); // TOCA PARA CENTRAL
                           ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                             content: Text(
