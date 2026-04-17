@@ -1,14 +1,14 @@
-import 'dart:io';
-import 'dart:convert'; 
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:excel/excel.dart' hide Border; 
 
 // IMPORTAÇÃO DO MENU (LOGOUT E PERFIL)
 import '../../widgets/menu_usuario.dart';
@@ -24,28 +24,40 @@ class _RelatoriosPageState extends State<RelatoriosPage> with SingleTickerProvid
   final User? user = FirebaseAuth.instance.currentUser;
   late TabController _tabController;
 
+  // Controle de Perfil
+  bool _carregandoPerfil = true;
+
   // ==== ESTADOS DA ABA CONSULTA ====
   DateTime? _deConsulta;
   DateTime? _ateConsulta;
-  String _rotaConsulta = 'Todas';
   final TextEditingController _semaforoController = TextEditingController();
-  bool _filtrosAplicadosConsulta = false;
+  bool _buscandoSemaforo = false;
+  List<Map<String, dynamic>> _resultadoSemaforo = [];
 
   // ==== ESTADOS DA ABA EXPORTAÇÃO ====
-  DateTime? _deExport;
-  DateTime? _ateExport;
+  DateTime? _dataExport; 
   String _rotaExport = 'Selecione';
 
   // ==== ESTADOS DA ABA PENDÊNCIAS ====
   DateTime _mesPendencia = DateTime(DateTime.now().year, DateTime.now().month, 1);
-  String _rotaPendencia = 'Todas';
+  Map<String, int> _totalSemaforosPorRota = {}; // Para mostrar o total cadastrado
 
   final Map<String, String> _cacheNomes = {};
+  
+  // Cache de Rotas e Semáforos
+  final List<String> _todasAsRotas = ['Todas']; 
+  List<Map<String, String>> _opcoesSemaforos = []; 
+  Map<String, String> _mapaRotas = {}; 
+  
+  bool _exportando = false;
+  bool _calculandoPendencias = false;
+  Map<String, List<Map<String, dynamic>>> _resultadoPendencias = {};
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _carregarDadosBase();
   }
 
   @override
@@ -55,99 +67,105 @@ class _RelatoriosPageState extends State<RelatoriosPage> with SingleTickerProvid
     super.dispose();
   }
 
+  // ==== FUNÇÃO PARA FORMATAR O ID DO SEMÁFORO COM ZERO À ESQUERDA ====
+  String _formatarId(String idStr) {
+    if (idStr.isEmpty) return '000';
+    String numeros = idStr.replaceAll(RegExp(r'[^0-9]'), '');
+    if (numeros.isEmpty) return idStr;
+    return numeros.padLeft(3, '0');
+  }
+
+  Future<void> _carregarDadosBase() async {
+    try {
+      var snapSemaforos = await FirebaseFirestore.instance.collection('semaforos').get();
+      Set<String> rotasUnicas = {};
+      Map<String, String> mapaLocal = {};
+      List<Map<String, String>> semaforosLocal = []; 
+      
+      for (var doc in snapSemaforos.docs) {
+        var data = doc.data();
+        String idOriginal = data['id'].toString();
+        String idFormatado = _formatarId(idOriginal);
+        String endereco = (data['endereco'] ?? '').toString();
+        String rota = (data['rota'] ?? '').toString().replaceFirst(RegExp(r'^0+'), '');
+        
+        if (idOriginal.isNotEmpty) {
+          if (rota.isNotEmpty) {
+            mapaLocal[idOriginal] = rota;
+            rotasUnicas.add(rota);
+          }
+          semaforosLocal.add({
+            'id': idOriginal, 
+            'label': '$idFormatado - $endereco' 
+          }); 
+        }
+      }
+
+      List<String> listaOrdenada = rotasUnicas.toList()..sort((a, b) => (int.tryParse(a) ?? 0).compareTo(int.tryParse(b) ?? 0));
+      semaforosLocal.sort((a, b) => (int.tryParse(a['label']!.split(' - ')[0]) ?? 0).compareTo(int.tryParse(b['label']!.split(' - ')[0]) ?? 0));
+      
+      if (mounted) {
+        setState(() {
+          _mapaRotas = mapaLocal;
+          _todasAsRotas.addAll(listaOrdenada);
+          _opcoesSemaforos = semaforosLocal;
+          _carregandoPerfil = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Erro ao carregar base: $e");
+      if (mounted) {
+        setState(() => _carregandoPerfil = false);
+      }
+    }
+  }
+
   Future<String> _getNomeVistoriador(String uid) async {
     if (_cacheNomes.containsKey(uid)) return _cacheNomes[uid]!;
     try {
       var doc = await FirebaseFirestore.instance.collection('usuarios').doc(uid).get();
       if (doc.exists && doc.data() != null) {
-        String nome = doc.data()!['nome'] ?? doc.data()!['nome_completo'] ?? 'Vistoriador';
-        _cacheNomes[uid] = nome;
-        return nome;
+        String nome = doc.data()!['nomeCompleto'] ?? doc.data()!['nome_completo'] ?? doc.data()!['nome'] ?? 'Vistoriador';
+        _cacheNomes[uid] = nome.toUpperCase();
+        return nome.toUpperCase();
       }
     } catch (e) {
       // Ignora erro
     }
-    return 'Desconhecido';
+    return 'DESCONHECIDO';
   }
 
-  Future<void> _selecionarData(BuildContext context, {bool isDe = true, required String tipoAba}) async {
+  Future<void> _selecionarData(BuildContext context, {required bool isDe, required String tipoAba}) async {
     DateTime initial = DateTime.now();
     DateTime? picked = await showDatePicker(
       context: context,
       initialDate: initial,
       firstDate: DateTime(2024),
       lastDate: DateTime.now(),
-      helpText: isDe ? 'SELECIONE A DATA INICIAL' : 'SELECIONE A DATA FINAL',
+      helpText: tipoAba == 'Exportacao' ? 'SELECIONE A DATA DA ROTA' : (isDe ? 'SELECIONE A DATA INICIAL' : 'SELECIONE A DATA FINAL'),
     );
 
     if (picked != null) {
       setState(() {
         if (tipoAba == 'Consulta') {
-          if (isDe) _deConsulta = DateTime(picked.year, picked.month, picked.day, 0, 0, 0);
-          else _ateConsulta = DateTime(picked.year, picked.month, picked.day, 23, 59, 59);
-          _filtrosAplicadosConsulta = false;
+          if (isDe) {
+            _deConsulta = DateTime(picked.year, picked.month, picked.day, 0, 0, 0);
+          } else {
+            _ateConsulta = DateTime(picked.year, picked.month, picked.day, 23, 59, 59);
+          }
         } else if (tipoAba == 'Exportacao') {
-          if (isDe) _deExport = DateTime(picked.year, picked.month, picked.day, 0, 0, 0);
-          else _ateExport = DateTime(picked.year, picked.month, picked.day, 23, 59, 59);
+          _dataExport = DateTime(picked.year, picked.month, picked.day, 0, 0, 0);
         }
       });
     }
-  }
-
-  Future<void> _selecionarMesAnoDialog(BuildContext context) async {
-    int mesSelecionado = _mesPendencia.month;
-    int anoSelecionado = _mesPendencia.year;
-
-    await showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setStateDialog) {
-            return AlertDialog(
-              title: const Text('Selecione o Mês e Ano', style: TextStyle(fontWeight: FontWeight.bold)),
-              content: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  DropdownButton<int>(
-                    value: mesSelecionado,
-                    items: List.generate(12, (index) => DropdownMenuItem(value: index + 1, child: Text((index + 1).toString().padLeft(2, '0')))),
-                    onChanged: (val) => setStateDialog(() => mesSelecionado = val!),
-                  ),
-                  const Text('/', style: TextStyle(fontSize: 20)),
-                  DropdownButton<int>(
-                    value: anoSelecionado,
-                    items: List.generate(10, (index) => DropdownMenuItem(value: 2024 + index, child: Text((2024 + index).toString()))),
-                    onChanged: (val) => setStateDialog(() => anoSelecionado = val!),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white),
-                  onPressed: () {
-                    setState(() {
-                      _mesPendencia = DateTime(anoSelecionado, mesSelecionado, 1);
-                    });
-                    Navigator.pop(context);
-                  },
-                  child: const Text('Confirmar'),
-                )
-              ],
-            );
-          }
-        );
-      }
-    );
   }
 
   void _limparFiltrosConsulta() {
     setState(() {
       _deConsulta = null;
       _ateConsulta = null;
-      _rotaConsulta = 'Todas';
       _semaforoController.clear();
-      _filtrosAplicadosConsulta = false;
+      _resultadoSemaforo.clear();
     });
   }
 
@@ -177,37 +195,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> with SingleTickerProvid
     );
   }
 
-  void _abrirFotoTelaCheia(String url) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return Dialog(
-          backgroundColor: Colors.black87,
-          insetPadding: const EdgeInsets.all(0),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              InteractiveViewer(
-                panEnabled: true,
-                minScale: 0.5,
-                maxScale: 4.0,
-                child: Image.network(url, fit: BoxFit.contain, width: double.infinity, height: double.infinity),
-              ),
-              Positioned(
-                top: 20, right: 20,
-                child: IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white, size: 32),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ),
-            ],
-          ),
-        );
-      }
-    );
-  }
-
-  // ==== RODAPÉ FIXO DO PDF ====
+  // ==== RODAPÉ FIXO DO PDF COM TEXTO SOLICITADO ====
   pw.Widget _buildRodapePDF(pw.Context context, String dataHora) {
     return pw.Container(
       alignment: pw.Alignment.bottomCenter,
@@ -219,11 +207,11 @@ class _RelatoriosPageState extends State<RelatoriosPage> with SingleTickerProvid
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
-              pw.SizedBox(width: 50), // Espaçador para manter o texto do meio centralizado
+              pw.SizedBox(width: 20),
               pw.Expanded(
-                child: pw.Text('Relatório gerado pelo aplicativo Vistoria CTTU ($dataHora)', textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
+                child: pw.Text('Relatório gerado pelo Sistema de Ocorrências Semafóricas - SOS ($dataHora)', textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700)),
               ),
-              pw.SizedBox(width: 50, child: pw.Text('Pág. ${context.pageNumber} / ${context.pagesCount}', textAlign: pw.TextAlign.right, style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700))),
+              pw.SizedBox(width: 20, child: pw.Text('Pág. ${context.pageNumber} / ${context.pagesCount}', textAlign: pw.TextAlign.right, style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700))),
             ]
           )
         ]
@@ -231,725 +219,947 @@ class _RelatoriosPageState extends State<RelatoriosPage> with SingleTickerProvid
     );
   }
 
-  Future<void> _exportarPDFIndividual(Map<String, dynamic> vistoria, String nomeVistoriador) async {
+  // ============================================================
+  // ABA 1: CONSULTA SEMÁFORO
+  // ============================================================
+  Future<void> _buscarVistoriasSemaforo({String? idSemaforo}) async {
+    String idOriginalBusca = '';
+
+    if (idSemaforo != null) {
+      idOriginalBusca = idSemaforo;
+    } else {
+      String textoPesquisa = _semaforoController.text.trim();
+      var match = _opcoesSemaforos.where((s) => s['label'] == textoPesquisa).toList();
+      if (match.isNotEmpty) {
+        idOriginalBusca = match.first['id']!;
+      } else {
+        String trechoNumero = textoPesquisa.split(' - ')[0].trim();
+        var fallbackMatch = _opcoesSemaforos.where((s) => _formatarId(s['id']!) == _formatarId(trechoNumero)).toList();
+        if (fallbackMatch.isNotEmpty) {
+          idOriginalBusca = fallbackMatch.first['id']!;
+        } else {
+          idOriginalBusca = trechoNumero; 
+        }
+      }
+    }
+    
+    if (idOriginalBusca.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione um semáforo!'), backgroundColor: Colors.orange));
+      return;
+    }
+
+    setState(() => _buscandoSemaforo = true);
+
+    try {
+      Query query = FirebaseFirestore.instance.collection('vistoria').where('semaforo_id', isEqualTo: idOriginalBusca);
+      
+      var snapshot = await query.get();
+      List<Map<String, dynamic>> filtrados = [];
+
+      for (var doc in snapshot.docs) {
+        var data = doc.data() as Map<String, dynamic>;
+        
+        if (_deConsulta != null || _ateConsulta != null) {
+          if (data['criado_em'] == null) continue;
+          DateTime dt = (data['criado_em'] as Timestamp).toDate();
+          if (_deConsulta != null && dt.isBefore(_deConsulta!)) continue;
+          if (_ateConsulta != null && dt.isAfter(_ateConsulta!)) continue;
+        }
+
+        data['nome_vistoriador'] = await _getNomeVistoriador(data['vistoriador_uid'] ?? '');
+        filtrados.add(data);
+      }
+
+      filtrados.sort((a, b) {
+        Timestamp tA = a['criado_em'] ?? Timestamp(0, 0);
+        Timestamp tB = b['criado_em'] ?? Timestamp(0, 0);
+        return tB.compareTo(tA); 
+      });
+
+      if (mounted) {
+        setState(() {
+          _resultadoSemaforo = filtrados;
+          _buscandoSemaforo = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _buscandoSemaforo = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red));
+      }
+    }
+  }
+
+  Future<void> _gerarFichaPDFSemaforo(Map<String, dynamic> vistoria) async {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Baixando fotos e gerando PDF...'), backgroundColor: Colors.teal));
     try {
       bool temFalha = vistoria['teve_anormalidade'] == true;
       List<dynamic> urlsFotos = vistoria['fotos'] ?? [];
       List<pw.ImageProvider> imagensPdf = [];
 
-      for (String url in urlsFotos) {
+      for (String base64Str in urlsFotos) {
         try {
-          final imageBytes = await networkImage(url);
-          imagensPdf.add(imageBytes);
+          if (base64Str.startsWith('http')) {
+            final imageBytes = await networkImage(base64Str);
+            imagensPdf.add(imageBytes);
+          } else {
+            final imageBytes = base64Decode(base64Str);
+            imagensPdf.add(pw.MemoryImage(imageBytes));
+          }
         } catch (e) {
-          debugPrint('Erro ao baixar imagem pro pdf: $e');
+          debugPrint('Erro ao decodificar imagem pro pdf: $e');
         }
       }
 
       String dataHoraAtual = DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now());
+      final pdf = pw.Document();
+      
+      String idFormatado = _formatarId(vistoria['semaforo_id']?.toString() ?? '');
 
-      await Printing.layoutPdf(
-        name: 'Ficha_Semaforo_${vistoria['semaforo_id']}.pdf',
-        onLayout: (PdfPageFormat format) async {
-          final pdf = pw.Document();
-          
-          pdf.addPage(
-            pw.MultiPage(
-              pageFormat: format, // <- FORMATO DINÂMICO
-              margin: const pw.EdgeInsets.only(left: 32, right: 32, top: 32, bottom: 20),
-              footer: (pw.Context context) => _buildRodapePDF(context, dataHoraAtual),
-              build: (pw.Context context) {
-                return [
-                  pw.Row(
-                    children: [
-                      pw.Container(width: 30, height: 30, decoration: pw.BoxDecoration(shape: pw.BoxShape.circle, color: temFalha ? PdfColors.red : PdfColors.green)),
-                      pw.SizedBox(width: 12),
-                      pw.Text('Semáforo Nº ${vistoria['semaforo_id']}', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey800)),
-                    ]
-                  ),
-                  pw.Divider(thickness: 2, height: 32),
-                  pw.Text('Vistoriador: $nomeVistoriador', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('Endereço: ${vistoria['semaforo_endereco']}', style: const pw.TextStyle(fontSize: 12)),
-                  pw.Text('Início: ${vistoria['data_hora_inicio']}', style: const pw.TextStyle(fontSize: 12)),
-                  pw.Text('Fim: ${vistoria['data_hora_fim']}', style: const pw.TextStyle(fontSize: 12)),
-                  pw.Text('Coordenadas GPS: ${vistoria['gps_coordenadas']}', style: const pw.TextStyle(fontSize: 12)),
-                  pw.SizedBox(height: 16),
-                  pw.Container(
-                    padding: const pw.EdgeInsets.all(12), width: double.infinity, decoration: pw.BoxDecoration(color: PdfColors.blue50, borderRadius: pw.BorderRadius.circular(8)),
-                    child: pw.Text(vistoria['resumo_checklist'] ?? 'Checklist verificado.', style: pw.TextStyle(color: PdfColors.blue800, fontWeight: pw.FontWeight.bold)),
-                  ),
-                  pw.SizedBox(height: 16),
-                  pw.Container(
-                    padding: const pw.EdgeInsets.all(12), width: double.infinity,
-                    decoration: pw.BoxDecoration(color: temFalha ? PdfColors.red50 : PdfColors.green50, border: pw.Border.all(color: temFalha ? PdfColors.red : PdfColors.green), borderRadius: pw.BorderRadius.circular(8)),
-                    child: pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        pw.Text(temFalha ? 'FALHA REGISTRADA:' : 'STATUS:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: temFalha ? PdfColors.red : PdfColors.green)),
-                        pw.Text(vistoria['falha_registrada'] ?? 'Nenhuma', style: const pw.TextStyle(fontSize: 14)),
-                        pw.SizedBox(height: 8),
-                        pw.Text('Detalhes:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: temFalha ? PdfColors.red : PdfColors.green)),
-                        pw.Text(vistoria['detalhes_ocorrencia'] ?? 'Sem detalhes', style: const pw.TextStyle(fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                  if (imagensPdf.isNotEmpty) ...[
-                    pw.SizedBox(height: 24),
-                    pw.Text('Fotos da Ocorrência:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
-                    pw.SizedBox(height: 12),
-                    pw.Wrap(
-                      spacing: 12, runSpacing: 12,
-                      children: imagensPdf.map((img) => pw.Container(width: 150, height: 150, decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey), borderRadius: pw.BorderRadius.circular(8), image: pw.DecorationImage(image: img, fit: pw.BoxFit.cover)))).toList(),
-                    )
-                  ]
-                ];
-              }
-            )
-          );
-          return pdf.save();
-        }
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.only(left: 32, right: 32, top: 32, bottom: 20),
+          footer: (pw.Context context) => _buildRodapePDF(context, dataHoraAtual),
+          build: (pw.Context context) {
+            return [
+              pw.Row(
+                children: [
+                  pw.Container(width: 30, height: 30, decoration: pw.BoxDecoration(shape: pw.BoxShape.circle, color: temFalha ? PdfColors.red : PdfColors.green)),
+                  pw.SizedBox(width: 12),
+                  pw.Text('Semáforo Nº $idFormatado', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey800)),
+                ]
+              ),
+              pw.Divider(thickness: 2, height: 32),
+              pw.Text('Vistoriador: ${vistoria['nome_vistoriador'] ?? ''}', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+              pw.Text('Endereço: ${vistoria['semaforo_endereco']}', style: const pw.TextStyle(fontSize: 12)),
+              pw.Text('Início: ${vistoria['data_hora_inicio']}', style: const pw.TextStyle(fontSize: 12)),
+              pw.Text('Fim: ${vistoria['data_hora_fim']}', style: const pw.TextStyle(fontSize: 12)),
+              pw.Text('Coordenadas GPS: ${vistoria['gps_coordenadas']}', style: const pw.TextStyle(fontSize: 12)),
+              pw.SizedBox(height: 16),
+              pw.Container(
+                padding: const pw.EdgeInsets.all(12), width: double.infinity, decoration: const pw.BoxDecoration(color: PdfColors.blue50, borderRadius: pw.BorderRadius.all(pw.Radius.circular(8))),
+                child: pw.Text(vistoria['resumo_checklist'] ?? 'Checklist verificado.', style: pw.TextStyle(color: PdfColors.blue800, fontWeight: pw.FontWeight.bold)),
+              ),
+              pw.SizedBox(height: 16),
+              pw.Container(
+                padding: const pw.EdgeInsets.all(12), width: double.infinity,
+                decoration: pw.BoxDecoration(color: temFalha ? PdfColors.red50 : PdfColors.green50, border: pw.Border.all(color: temFalha ? PdfColors.red : PdfColors.green), borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8))),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(temFalha ? 'FALHA REGISTRADA:' : 'STATUS:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: temFalha ? PdfColors.red : PdfColors.green)),
+                    pw.Text(vistoria['falha_registrada'] ?? 'Nenhuma', style: const pw.TextStyle(fontSize: 14)),
+                    pw.SizedBox(height: 8),
+                    pw.Text('Detalhes:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: temFalha ? PdfColors.red : PdfColors.green)),
+                    pw.Text(vistoria['detalhes_ocorrencia'] ?? 'Sem detalhes', style: const pw.TextStyle(fontSize: 12)),
+                  ],
+                ),
+              ),
+
+              if (imagensPdf.isNotEmpty) ...[
+                pw.SizedBox(height: 24),
+                pw.Text('Fotos da Ocorrência:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
+                pw.SizedBox(height: 12),
+                pw.Wrap(
+                  spacing: 12, runSpacing: 12,
+                  children: imagensPdf.map((img) => pw.Container(width: 150, height: 150, decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey), borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)), image: pw.DecorationImage(image: img, fit: pw.BoxFit.cover)))).toList(),
+                )
+              ],
+            ];
+          }
+        )
       );
+
+      await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save(), name: 'Ficha_Semaforo_$idFormatado.pdf');
+      
     } catch (e) {
       if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao gerar PDF da ficha!'), backgroundColor: Colors.red));
     }
   }
 
-  Future<void> _exportarPDFGlobal(List<Map<String, dynamic>> vistorias, String rotaNumero) async {
-    if (vistorias.isEmpty) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gerando PDF Global...'), backgroundColor: Colors.teal));
-    try {
-      String dataHoraAtual = DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now());
-
-      await Printing.layoutPdf(
-        name: 'Relatorio_Rota$rotaNumero.pdf',
-        onLayout: (PdfPageFormat format) async {
-          final pdf = pw.Document();
-          
-          pdf.addPage(
-            pw.MultiPage(
-              pageFormat: format, // <- FORMATO DINÂMICO
-              margin: const pw.EdgeInsets.only(left: 24, right: 24, top: 24, bottom: 20),
-              footer: (pw.Context context) => _buildRodapePDF(context, dataHoraAtual),
-              build: (pw.Context context) {
-                return [
-                  pw.Header(level: 0, child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text('Relatório de Vistorias', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
-                      pw.SizedBox(height: 4),
-                      pw.Text('Rota: $rotaNumero', style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700)),
-                    ]
-                  )),
-                  pw.SizedBox(height: 16),
-                  pw.TableHelper.fromTextArray(
-                    context: context,
-                    headers: ['Semáforo', 'Vistoriador', 'Endereço', 'Início', 'Fim', 'Status', 'Falha', 'Detalhes', 'Fotos (Links)'],
-                    data: vistorias.map((v) {
-                      return [ 
-                        v['semaforo_id']?.toString() ?? '', v['nome_vistoriador']?.toString() ?? '', v['semaforo_endereco']?.toString() ?? '', 
-                        v['data_hora_inicio']?.toString() ?? '', v['data_hora_fim']?.toString() ?? '', v['teve_anormalidade'] == true ? 'COM FALHA' : 'OK', 
-                        v['falha_registrada'] ?? '-', v['detalhes_ocorrencia']?.toString().replaceAll('\n', ' ') ?? '-', (v['fotos'] ?? []).join('\n\n')
-                      ];
-                    }).toList(),
-                    headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 8),
-                    headerDecoration: const pw.BoxDecoration(color: PdfColors.teal700),
-                    cellAlignment: pw.Alignment.centerLeft, cellStyle: const pw.TextStyle(fontSize: 7),
-                    columnWidths: { 0: const pw.FlexColumnWidth(1), 1: const pw.FlexColumnWidth(1.2), 2: const pw.FlexColumnWidth(1.5), 3: const pw.FlexColumnWidth(1), 4: const pw.FlexColumnWidth(1), 5: const pw.FlexColumnWidth(1), 6: const pw.FlexColumnWidth(1.2), 7: const pw.FlexColumnWidth(1.5), 8: const pw.FlexColumnWidth(2) }
-                  ),
-                ];
-              }
-            )
-          );
-          return pdf.save();
-        }
-      );
-    } catch (e) {
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao gerar PDF!'), backgroundColor: Colors.red));
-    }
-  }
-
-  Future<void> _exportarExcelGlobal(List<Map<String, dynamic>> vistorias) async {
-    if (vistorias.isEmpty) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gerando Excel...'), backgroundColor: Colors.green));
-    try {
-      String csv = '\uFEFF'; 
-      csv += 'SEMAFORO;VISTORIADOR;ENDERECO;INICIO;FIM;COORDENADAS;STATUS;FALHA;DETALHES;FOTOS\n';
-      for (var v in vistorias) {
-        String status = v['teve_anormalidade'] == true ? 'COM FALHA' : 'OK';
-        csv += '${v['semaforo_id']};${v['nome_vistoriador'] ?? ''};${v['semaforo_endereco']};${v['data_hora_inicio']};${v['data_hora_fim']};${v['gps_coordenadas']};$status;${v['falha_registrada']};${v['detalhes_ocorrencia']?.toString().replaceAll('\n', ' ')};${(v['fotos'] ?? []).join(', ')}\n';
-      }
-      final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/Relatorio_Vistorias.csv'; // Corrigido a extensão para .csv
-      final file = File(path);
-      await file.writeAsBytes(utf8.encode(csv));
-      await Share.shareXFiles([XFile(path)], text: 'Planilha de Vistorias.');
-    } catch (e) {
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao gerar Excel!'), backgroundColor: Colors.red));
-    }
-  }
-
-  Future<void> _realizarExportacao(String tipoExportacao, Map<String, String> mapaRotas) async {
-    // ==== AQUI FOI ALTERADA A COLEÇÃO PARA "vistoria" ====
-    QuerySnapshot snapshot = await FirebaseFirestore.instance.collection('vistoria').where('criado_em', isGreaterThanOrEqualTo: _deExport).where('criado_em', isLessThanOrEqualTo: _ateExport).orderBy('criado_em', descending: true).get();
-    List<Map<String, dynamic>> vistoriasFiltradas = [];
-    String rotaSelecionadaLimpa = _rotaExport.replaceFirst(RegExp(r'^0+'), '');
-
-    for (var doc in snapshot.docs) {
-      var data = doc.data() as Map<String, dynamic>;
-      String rotaDesteSemaforo = mapaRotas[data['semaforo_id'].toString()] ?? '';
-      if (_rotaExport == 'Todas' || rotaDesteSemaforo == rotaSelecionadaLimpa) {
-        data['nome_vistoriador'] = await _getNomeVistoriador(data['vistoriador_uid'] ?? '');
-        vistoriasFiltradas.add(data);
-      }
-    }
-    if (vistoriasFiltradas.isEmpty) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Nenhuma vistoria encontrada para este filtro!'), backgroundColor: Colors.orange));
-      return;
-    }
-    if (tipoExportacao == 'PDF') await _exportarPDFGlobal(vistoriasFiltradas, _rotaExport);
-    else await _exportarExcelGlobal(vistoriasFiltradas);
-  }
-
-  Future<void> _exportarPendenciasPDF(Map<String, List<Map<String, dynamic>>> pendentesPorRota, Map<String, Map<String, dynamic>> statsPorRota, String mesFiltro) async {
-    if (pendentesPorRota.isEmpty) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gerando PDF de Semáforos não vistoriados...'), backgroundColor: Colors.red));
-    try {
-      String dataHoraAtual = DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now());
-
-      await Printing.layoutPdf(
-        name: 'Omissões_$mesFiltro.pdf',
-        onLayout: (PdfPageFormat format) async {
-          final pdf = pw.Document();
-          
-          pdf.addPage(
-            pw.MultiPage(
-              pageFormat: format, // <- FORMATO DINÂMICO
-              margin: const pw.EdgeInsets.only(left: 32, right: 32, top: 32, bottom: 20),
-              footer: (pw.Context context) => _buildRodapePDF(context, dataHoraAtual),
-              build: (pw.Context context) {
-                return [
-                  pw.Header(level: 0, child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text('Relatório de Semáforos Não Vistoriados', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.red800)),
-                      pw.SizedBox(height: 4),
-                      pw.Text('Mês de referência: $mesFiltro', style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700)),
-                    ]
-                  )),
-                  pw.SizedBox(height: 16),
-                  pw.TableHelper.fromTextArray(
-                    context: context,
-                    headers: ['Rota', 'Qtd. Não Vistoriados', 'Semáforos (IDs)'],
-                    data: pendentesPorRota.keys.map((rota) {
-                      return [ 'Rota $rota', statsPorRota[rota]!['omitidos'].toString(), pendentesPorRota[rota]!.map((e) => e['id'].toString()).join(', ') ];
-                    }).toList(),
-                    headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
-                    headerDecoration: const pw.BoxDecoration(color: PdfColors.red700),
-                    cellAlignment: pw.Alignment.centerLeft,
-                    columnWidths: { 0: const pw.FlexColumnWidth(1), 1: const pw.FlexColumnWidth(1.5), 2: const pw.FlexColumnWidth(3) }
-                  ),
-                ];
-              }
-            )
-          );
-          return pdf.save();
-        }
-      );
-    } catch (e) {
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao gerar PDF de Pendências!'), backgroundColor: Colors.red));
-    }
-  }
-
-  Future<void> _exportarPendenciasExcel(Map<String, List<Map<String, dynamic>>> pendentesPorRota, Map<String, Map<String, dynamic>> statsPorRota, String mesFiltro) async {
-    if (pendentesPorRota.isEmpty) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gerando Planilha de Semáforos Não Vistoriados...'), backgroundColor: Colors.green));
-    try {
-      String csv = '\uFEFF'; 
-      csv += 'Mês do Filtro:;$mesFiltro\n\n';
-      csv += 'ROTA;QTD NAO VISTORIADOS;SEMAFOROS PENDENTES\n';
-      for (var rota in pendentesPorRota.keys) {
-        csv += 'Rota $rota;${statsPorRota[rota]!['omitidos']};${pendentesPorRota[rota]!.map((e) => e['id'].toString()).join(', ')}\n';
-      }
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/Omissões_${mesFiltro.replaceAll('/', '-')}.csv'); // Corrigido a extensão
-      await file.writeAsBytes(utf8.encode(csv));
-      await Share.shareXFiles([XFile(file.path)], text: 'Lista de semáforos não vistoriados - $mesFiltro.');
-    } catch (e) {
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao exportar Pendências!'), backgroundColor: Colors.red));
-    }
-  }
-
-  void _mostrarDetalhesVistoriaAnterior(Map<String, dynamic> vistoria, String rotaExibicao, String nomeVistoriador) {
-    showModalBottomSheet(
-      context: context, isScrollControlled: true, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) {
-        bool temFalha = vistoria['teve_anormalidade'] == true;
-        List<dynamic> fotos = vistoria['fotos'] ?? [];
-        return DraggableScrollableSheet(
-          initialChildSize: 0.85, minChildSize: 0.5, maxChildSize: 0.95, expand: false,
-          builder: (context, scrollController) {
-            return Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: SingleChildScrollView(
-                controller: scrollController,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(temFalha ? Icons.warning_amber_rounded : Icons.check_circle, color: temFalha ? Colors.red : Colors.green, size: 36),
-                        const SizedBox(width: 12),
-                        Expanded(child: Text('Semáforo Nº ${vistoria['semaforo_id']}', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.blueGrey.shade800))),
-                      ],
-                    ),
-                    const Divider(thickness: 2, height: 32),
-                    _buildInfoRow('Vistoriador', nomeVistoriador),
-                    _buildInfoRow('Endereço', vistoria['semaforo_endereco']),
-                    _buildInfoRow('Início', vistoria['data_hora_inicio']),
-                    _buildInfoRow('Fim', vistoria['data_hora_fim']),
-                    _buildInfoRow('Coordenadas GPS', vistoria['gps_coordenadas']),
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.playlist_add_check, color: Colors.blue, size: 28),
-                          const SizedBox(width: 12),
-                          Expanded(child: Text(vistoria['resumo_checklist'] ?? 'Checklist verificado.', style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold))),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(12), width: double.infinity, decoration: BoxDecoration(color: temFalha ? Colors.red.shade50 : Colors.green.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: temFalha ? Colors.red : Colors.green)),
+  Widget _buildAbaSemaforo() {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16), color: Colors.blue.shade50,
+          child: Column(
+            children: [
+              DropdownMenu<String>(
+                expandedInsets: EdgeInsets.zero,
+                controller: _semaforoController,
+                enableFilter: true,
+                enableSearch: true,
+                hintText: 'Digite o Nº ou Endereço...',
+                label: const Text('Pesquisar Semáforo', style: TextStyle(fontWeight: FontWeight.bold)),
+                leadingIcon: const Icon(Icons.traffic),
+                inputDecorationTheme: InputDecorationTheme(
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                dropdownMenuEntries: _opcoesSemaforos.map((s) {
+                  return DropdownMenuEntry<String>(value: s['id']!, label: s['label']!);
+                }).toList(),
+                onSelected: (val) {
+                  if (val != null) {
+                    _semaforoController.text = _opcoesSemaforos.firstWhere((element) => element['id'] == val)['label']!;
+                    _buscarVistoriasSemaforo(idSemaforo: val); 
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              Row(children: [
+                _buildBotaoData('Data De', _deConsulta, () => _selecionarData(context, isDe: true, tipoAba: 'Consulta')),
+                const SizedBox(width: 8),
+                _buildBotaoData('Data Até', _ateConsulta, () => _selecionarData(context, isDe: false, tipoAba: 'Consulta')),
+              ]),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity, height: 45,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white),
+                  icon: _buscandoSemaforo ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.search),
+                  label: const Text('Atualizar Filtro de Data', style: TextStyle(fontWeight: FontWeight.bold)),
+                  onPressed: _buscandoSemaforo ? null : () => _buscarVistoriasSemaforo(),
+                ),
+              ),
+              if (_deConsulta != null || _ateConsulta != null || _resultadoSemaforo.isNotEmpty)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(onPressed: _limparFiltrosConsulta, child: const Text('Limpar Pesquisa', style: TextStyle(color: Colors.red))),
+                )
+            ],
+          ),
+        ),
+        Expanded(
+          child: _resultadoSemaforo.isEmpty
+            ? Center(child: Text('Nenhum resultado. Pesquise um semáforo acima.', style: TextStyle(color: Colors.grey.shade500, fontSize: 16)))
+            : ListView.builder(
+                padding: const EdgeInsets.all(12),
+                itemCount: _resultadoSemaforo.length,
+                itemBuilder: (context, index) {
+                  var item = _resultadoSemaforo[index];
+                  bool temFalha = item['teve_anormalidade'] == true;
+                  String idFormatado = _formatarId(item['semaforo_id']?.toString() ?? '');
+                  String rotaDoSem = _mapaRotas[item['semaforo_id']?.toString()] ?? 'S/R';
+                  
+                  return Card(
+                    elevation: 2, margin: const EdgeInsets.only(bottom: 12),
+                    shape: RoundedRectangleBorder(side: BorderSide(color: temFalha ? Colors.red.shade200 : Colors.green.shade200, width: 2), borderRadius: BorderRadius.circular(8)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(temFalha ? 'FALHA REGISTRADA:' : 'STATUS:', style: TextStyle(fontWeight: FontWeight.bold, color: temFalha ? Colors.red : Colors.green)),
-                          Text(vistoria['falha_registrada'] ?? 'Nenhuma', style: const TextStyle(fontSize: 16)),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Semáforo $idFormatado', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                              Icon(temFalha ? Icons.warning : Icons.check_circle, color: temFalha ? Colors.red : Colors.green),
+                            ],
+                          ),
+                          Text('Rota: $rotaDoSem', style: const TextStyle(color: Colors.blueGrey)),
+                          const Divider(),
+                          Text('Vistoriador: ${item['nome_vistoriador']}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                          Text('Data da Vistoria: ${item['data_hora_inicio']}'),
                           const SizedBox(height: 8),
-                          Text('Detalhes:', style: TextStyle(fontWeight: FontWeight.bold, color: temFalha ? Colors.red : Colors.green)),
-                          Text(vistoria['detalhes_ocorrencia'] ?? 'Sem detalhes', style: const TextStyle(fontSize: 14)),
+                          if (temFalha) ...[
+                            Text('Falha: ${item['falha_registrada']}', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red.shade800)),
+                            Text('Detalhes: ${item['detalhes_ocorrencia']}'),
+                          ] else ...[
+                            const Text('Status: Sem defeitos constatados', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                          ],
+                          const SizedBox(height: 12),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: OutlinedButton.icon(
+                              icon: const Icon(Icons.picture_as_pdf, size: 16), label: const Text('Ver Ficha PDF'),
+                              onPressed: () => _gerarFichaPDFSemaforo(item),
+                            ),
+                          )
                         ],
                       ),
                     ),
-                    if (fotos.isNotEmpty) ...[
-                      const SizedBox(height: 24),
-                      const Text('Fotos da Ocorrência:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 12, runSpacing: 12, 
-                        children: fotos.map((url) => GestureDetector(
-                          onTap: () => _abrirFotoTelaCheia(url), // ABRIR FOTO EM TELA CHEIA
-                          child: Container(
-                            width: 100, height: 100, 
-                            decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey), image: DecorationImage(image: NetworkImage(url), fit: BoxFit.cover))
-                          ),
-                        )).toList()
-                      )
-                    ],
-                    const SizedBox(height: 32),
-                    SizedBox(
-                      width: double.infinity, height: 50,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade700, foregroundColor: Colors.white), icon: const Icon(Icons.picture_as_pdf), label: const Text('Exportar PDF Desta Vistoria', style: TextStyle(fontWeight: FontWeight.bold)),
-                        onPressed: () => _exportarPDFIndividual(vistoria, nomeVistoriador),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(width: double.infinity, height: 50, child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.grey.shade300, foregroundColor: Colors.black87), onPressed: () => Navigator.pop(context), child: const Text('Fechar Ficha', style: TextStyle(fontWeight: FontWeight.bold))))
-                  ],
-                ),
+                  );
+                },
               ),
-            );
-          }
-        );
-      }
+        )
+      ],
     );
   }
 
-  Widget _buildInfoRow(String label, String? value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: RichText(text: TextSpan(style: const TextStyle(color: Colors.black87, fontSize: 15), children: [
-        TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)), TextSpan(text: value ?? '-'),
-      ])),
+  // ============================================================
+  // ABA 2: ROTAS (EXPORTAÇÃO E EXCEL NATIVO)
+  // ============================================================
+  Future<void> _realizarExportacao(String tipo) async {
+    if (_dataExport == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione a data da rota!'), backgroundColor: Colors.orange));
+      return;
+    }
+
+    setState(() => _exportando = true);
+
+    try {
+      DateTime startOfDay = DateTime(_dataExport!.year, _dataExport!.month, _dataExport!.day, 0, 0, 0);
+      DateTime endOfDay = DateTime(_dataExport!.year, _dataExport!.month, _dataExport!.day, 23, 59, 59);
+
+      var snapSemaforos = await FirebaseFirestore.instance.collection('semaforos').get();
+      
+      List<Map<String, dynamic>> todosSemaforosRota = [];
+      String rotaSelecionadaLimpa = _rotaExport.replaceFirst(RegExp(r'^0+'), '');
+
+      for (var doc in snapSemaforos.docs) {
+        var data = doc.data();
+        String rotaDesteSem = (data['rota'] ?? '').toString().replaceFirst(RegExp(r'^0+'), '');
+        
+        if (_rotaExport == 'Todas' || rotaDesteSem == rotaSelecionadaLimpa) {
+          todosSemaforosRota.add({
+            'id': data['id'].toString(),
+            'rota': rotaDesteSem.isEmpty ? 'S/R' : rotaDesteSem,
+          });
+        }
+      }
+
+      todosSemaforosRota.sort((a, b) => (int.tryParse(a['id']) ?? 0).compareTo(int.tryParse(b['id']) ?? 0));
+
+      if (todosSemaforosRota.isEmpty) {
+        setState(() => _exportando = false);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Nenhum semáforo encontrado para esta rota!'), backgroundColor: Colors.orange));
+        return;
+      }
+
+      QuerySnapshot snapVistorias = await FirebaseFirestore.instance.collection('vistoria')
+          .where('criado_em', isGreaterThanOrEqualTo: startOfDay)
+          .where('criado_em', isLessThanOrEqualTo: endOfDay)
+          .orderBy('criado_em', descending: true)
+          .get();
+
+      Map<String, Map<String, dynamic>> vistoriasMap = {};
+      for (var doc in snapVistorias.docs) {
+        var data = doc.data() as Map<String, dynamic>;
+        String idSem = data['semaforo_id'].toString();
+        
+        if (!vistoriasMap.containsKey(idSem)) {
+          data['nome_vistoriador'] = await _getNomeVistoriador(data['vistoriador_uid'] ?? '');
+          vistoriasMap[idSem] = data;
+        }
+      }
+
+      List<Map<String, dynamic>> dadosFinais = [];
+      for (var semaforo in todosSemaforosRota) {
+        String idSem = semaforo['id'];
+        var vistoria = vistoriasMap[idSem];
+
+        if (vistoria != null) {
+          bool temFalha = vistoria['teve_anormalidade'] == true;
+          String status = temFalha ? (vistoria['falha_registrada'] ?? 'DEFEITO') : 'SEM FALHA APARENTE';
+          
+          dadosFinais.add({
+            'rota': semaforo['rota'],
+            'semaforo_id': idSem,
+            'vistoriado': 'SIM',
+            'nome_vistoriador': vistoria['nome_vistoriador'],
+            'data_hora': vistoria['data_hora_fim'] ?? vistoria['data_hora_inicio'] ?? '-',
+            'status': status,
+          });
+        } else {
+          dadosFinais.add({
+            'rota': semaforo['rota'],
+            'semaforo_id': idSem,
+            'vistoriado': 'NÃO',
+            'nome_vistoriador': '-',
+            'data_hora': '-',
+            'status': 'NÃO VISTORIADO',
+          });
+        }
+      }
+
+      int vistoriados = dadosFinais.where((v) => v['vistoriado'] == 'SIM').length;
+      int naoVistoriados = dadosFinais.where((v) => v['vistoriado'] == 'NÃO').length;
+      int total = dadosFinais.length;
+      double percentual = total > 0 ? (vistoriados / total) * 100 : 0;
+
+      if (tipo == 'PDF') {
+        await _exportarRotasPDF(dadosFinais, vistoriados, naoVistoriados, percentual);
+      } else {
+        await _exportarRotasExcel(dadosFinais, vistoriados, naoVistoriados, percentual);
+      }
+
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _exportando = false);
+    }
+  }
+
+  Future<void> _exportarRotasPDF(List<Map<String, dynamic>> dados, int vistoriados, int naoVistoriados, double percentual) async {
+    final pdf = pw.Document();
+    String dataHoraAtual = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
+    
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4.landscape,
+        margin: const pw.EdgeInsets.all(24),
+        footer: (pw.Context ctx) => _buildRodapePDF(ctx, dataHoraAtual),
+        build: (pw.Context context) {
+          return [
+            pw.Text('RELATÓRIO DE VISTORIAS DE ROTAS', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+            pw.Text('Filtro: Rota $_rotaExport | Data: ${DateFormat('dd/MM/yyyy').format(_dataExport!)}', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600)),
+            pw.SizedBox(height: 8),
+            
+            pw.Container(
+              padding: const pw.EdgeInsets.all(8),
+              decoration: pw.BoxDecoration(color: PdfColors.grey100, border: pw.Border.all(color: PdfColors.grey300)),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Vistoriados: $vistoriados', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.green800)),
+                  pw.Text('Não Vistoriados: $naoVistoriados', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.red800)),
+                  pw.Text('Conclusão: ${percentual.toStringAsFixed(1)}%', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.blue800)),
+                ]
+              )
+            ),
+            pw.SizedBox(height: 12),
+
+            pw.TableHelper.fromTextArray(
+              context: context,
+              headers: ['Semáforo', 'Vistoriado', 'Nome do Vistoriador', 'Data/Hora da Vistoria', 'Status'],
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 10),
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey800),
+              cellStyle: const pw.TextStyle(fontSize: 9),
+              cellAlignment: pw.Alignment.centerLeft,
+              data: dados.map((v) {
+                return [
+                  _formatarId(v['semaforo_id']?.toString() ?? ''),
+                  v['vistoriado'],
+                  v['nome_vistoriador'],
+                  v['data_hora'],
+                  v['status'],
+                ];
+              }).toList()
+            )
+          ];
+        }
+      )
+    );
+    await Printing.layoutPdf(onLayout: (format) async => pdf.save(), name: 'Exportacao_Rotas.pdf');
+  }
+
+  Future<void> _exportarRotasExcel(List<Map<String, dynamic>> dados, int vistoriados, int naoVistoriados, double percentual) async {
+    try {
+      var excel = Excel.createExcel();
+      Sheet sheetObject = excel['Relatorio'];
+      excel.setDefaultSheet('Relatorio');
+
+      sheetObject.appendRow([TextCellValue('RELATÓRIO DE ROTAS')]);
+      sheetObject.appendRow([TextCellValue('ROTA:'), TextCellValue(_rotaExport)]);
+      sheetObject.appendRow([TextCellValue('DATA:'), TextCellValue(DateFormat('dd/MM/yyyy').format(_dataExport!))]);
+      sheetObject.appendRow([TextCellValue('VISTORIADOS:'), IntCellValue(vistoriados)]);
+      sheetObject.appendRow([TextCellValue('NAO VISTORIADOS:'), IntCellValue(naoVistoriados)]);
+      sheetObject.appendRow([TextCellValue('CONCLUSAO:'), TextCellValue('${percentual.toStringAsFixed(1)}%')]);
+      sheetObject.appendRow([TextCellValue('')]);
+
+      sheetObject.appendRow([
+        TextCellValue('SEMAFORO'),
+        TextCellValue('VISTORIADO'),
+        TextCellValue('NOME DO VISTORIADOR'),
+        TextCellValue('DATA/HORA'),
+        TextCellValue('STATUS')
+      ]);
+
+      for (var v in dados) {
+        String idFormatado = _formatarId(v['semaforo_id']?.toString() ?? '');
+        sheetObject.appendRow([
+          TextCellValue(idFormatado),
+          TextCellValue(v['vistoriado']?.toString() ?? ''),
+          TextCellValue(v['nome_vistoriador']?.toString() ?? ''),
+          TextCellValue(v['data_hora']?.toString() ?? ''),
+          TextCellValue(v['status']?.toString() ?? '')
+        ]);
+      }
+
+      if (excel.tables.keys.contains('Sheet1')) {
+        excel.delete('Sheet1');
+      }
+
+      var fileBytes = excel.encode();
+      if (fileBytes != null) {
+        final xFile = XFile.fromData(
+          Uint8List.fromList(fileBytes),
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          name: 'Relatorio_Rotas.xlsx'
+        );
+        await Share.shareXFiles([xFile], text: 'Planilha de Rotas gerada pelo SOS.');
+      }
+    } catch (e) {
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao exportar Excel: $e'), backgroundColor: Colors.red));
+    }
+  }
+
+  Widget _buildAbaRotas() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Icon(Icons.route, size: 60, color: Colors.blueGrey),
+          const SizedBox(height: 16),
+          const Text('Exportação de Rotas', textAlign: TextAlign.center, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+          const SizedBox(height: 32),
+          
+          InputDecorator(
+            decoration: const InputDecoration(labelText: 'Selecione a Rota', border: OutlineInputBorder(), prefixIcon: Icon(Icons.map)),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                isExpanded: true,
+                value: _todasAsRotas.contains(_rotaExport) ? _rotaExport : 'Todas',
+                items: _todasAsRotas.map((r) => DropdownMenuItem(value: r, child: Text(r == 'Todas' ? 'Todas as Rotas' : 'Rota $r'))).toList(),
+                onChanged: (v) => setState(() => _rotaExport = v!),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          
+          const Text('Dia da Vistoria:', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Row(children: [
+            _buildBotaoData('Data', _dataExport, () => _selecionarData(context, isDe: true, tipoAba: 'Exportacao')),
+          ]),
+          const SizedBox(height: 40),
+
+          SizedBox(
+            height: 55,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+              icon: _exportando ? const SizedBox.shrink() : const Icon(Icons.picture_as_pdf),
+              label: _exportando ? const CircularProgressIndicator(color: Colors.white) : const Text('EXPORTAR PDF', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              onPressed: _exportando ? null : () => _realizarExportacao('PDF'),
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 55,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+              icon: _exportando ? const SizedBox.shrink() : const Icon(Icons.grid_on),
+              label: _exportando ? const CircularProgressIndicator(color: Colors.white) : const Text('EXPORTAR PLANILHA', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              onPressed: _exportando ? null : () => _realizarExportacao('EXCEL'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ABA 3: PENDÊNCIAS DE ROTAS
+  // ============================================================
+  Future<void> _calcularPendencias() async {
+    setState(() => _calculandoPendencias = true);
+
+    try {
+      DateTime start = DateTime(_mesPendencia.year, _mesPendencia.month, 1);
+      DateTime end = DateTime(_mesPendencia.year, _mesPendencia.month + 1, 0, 23, 59, 59);
+
+      var snapSemaforos = await FirebaseFirestore.instance.collection('semaforos').get();
+      Map<String, Map<String, List<String>>> semaforosMaster = {}; 
+      
+      for(var doc in snapSemaforos.docs) {
+        var data = doc.data();
+        String id = data['id'].toString();
+        String rota = (data['rota'] ?? '').toString().replaceFirst(RegExp(r'^0+'), '');
+        String grupo = (data['lado_vistoria'] ?? data['grupo'] ?? 'A').toString().toUpperCase();
+
+        if(rota.isEmpty || id.isEmpty) continue;
+
+        if(!semaforosMaster.containsKey(rota)) semaforosMaster[rota] = {'A': [], 'B': []};
+        if(!semaforosMaster[rota]!.containsKey(grupo)) semaforosMaster[rota]![grupo] = [];
+        semaforosMaster[rota]![grupo]!.add(id);
+      }
+
+      var snapTurnos = await FirebaseFirestore.instance.collection('turnos')
+          .where('data_inicio', isGreaterThanOrEqualTo: start)
+          .where('data_inicio', isLessThanOrEqualTo: end)
+          .get();
+
+      Map<String, Set<String>> rotasRodadasNoDia = {}; 
+      for(var doc in snapTurnos.docs) {
+        var data = doc.data();
+        if(data['data_inicio'] == null) continue;
+        DateTime d = (data['data_inicio'] as Timestamp).toDate();
+        String diaStr = DateFormat('yyyy-MM-dd').format(d);
+        String rota = (data['rota_numero'] ?? '').toString().replaceFirst(RegExp(r'^0+'), '');
+        
+        if(rota.isNotEmpty) {
+          if(!rotasRodadasNoDia.containsKey(diaStr)) rotasRodadasNoDia[diaStr] = {};
+          rotasRodadasNoDia[diaStr]!.add(rota);
+        }
+      }
+
+      var snapVistorias = await FirebaseFirestore.instance.collection('vistoria')
+          .where('criado_em', isGreaterThanOrEqualTo: start)
+          .where('criado_em', isLessThanOrEqualTo: end)
+          .get();
+
+      Map<String, Map<String, Set<String>>> vistoriasPorDiaERota = {}; 
+      for(var doc in snapVistorias.docs) {
+        var data = doc.data();
+        if(data['criado_em'] == null) continue;
+        DateTime d = (data['criado_em'] as Timestamp).toDate();
+        String diaStr = DateFormat('yyyy-MM-dd').format(d);
+        String idSem = data['semaforo_id'].toString();
+        String rota = _mapaRotas[idSem] ?? '';
+
+        if(rota.isNotEmpty) {
+          if(!vistoriasPorDiaERota.containsKey(diaStr)) vistoriasPorDiaERota[diaStr] = {};
+          if(!vistoriasPorDiaERota[diaStr]!.containsKey(rota)) vistoriasPorDiaERota[diaStr]![rota] = {};
+          vistoriasPorDiaERota[diaStr]![rota]!.add(idSem);
+        }
+      }
+
+      Map<String, List<Map<String, dynamic>>> resultadoFinal = {};
+      DateTime baseDate = DateTime(2024, 1, 1);
+
+      rotasRodadasNoDia.forEach((diaStr, rotasDesteDia) {
+        DateTime diaDt = DateTime.parse(diaStr);
+        int diasPassados = diaDt.difference(baseDate).inDays;
+        String grupoDaMeta = (diasPassados % 2 == 0) ? 'A' : 'B';
+
+        for(String rota in rotasDesteDia) {
+          List<String> metaDoDiaParaRota = semaforosMaster[rota]?[grupoDaMeta] ?? [];
+          Set<String> vistoriadosReal = vistoriasPorDiaERota[diaStr]?[rota] ?? {};
+
+          List<String> deixadosParaTras = metaDoDiaParaRota.where((id) => !vistoriadosReal.contains(id)).toList();
+
+          if (deixadosParaTras.isNotEmpty) {
+            if(!resultadoFinal.containsKey(rota)) resultadoFinal[rota] = [];
+            resultadoFinal[rota]!.add({
+              'dia_dt': diaDt,
+              'dia_str': DateFormat('dd/MM/yyyy').format(diaDt),
+              'qtd': deixadosParaTras.length,
+              'ids': deixadosParaTras.map((id) => _formatarId(id)).join(' - ')
+            });
+          }
+        }
+      });
+
+      resultadoFinal.forEach((key, list) {
+        list.sort((a, b) => (b['dia_dt'] as DateTime).compareTo(a['dia_dt'] as DateTime));
+      });
+
+      Map<String, int> totalCadastradoLocal = {};
+      semaforosMaster.forEach((rota, grupos) {
+        totalCadastradoLocal[rota] = (grupos['A']?.length ?? 0) + (grupos['B']?.length ?? 0);
+      });
+
+      if (mounted) {
+        setState(() {
+          _resultadoPendencias = resultadoFinal;
+          _totalSemaforosPorRota = totalCadastradoLocal;
+          _calculandoPendencias = false;
+        });
+      }
+
+    } catch (e) {
+      if (mounted) {
+        setState(() => _calculandoPendencias = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red));
+      }
+    }
+  }
+
+  Future<void> _escolherMesPendencia() async {
+    int mes = _mesPendencia.month;
+    int ano = _mesPendencia.year;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setStateDialog) => AlertDialog(
+          title: const Text('Filtrar Mês/Ano'),
+          content: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              DropdownButton<int>(
+                value: mes,
+                items: List.generate(12, (i) => DropdownMenuItem(value: i+1, child: Text((i+1).toString().padLeft(2, '0')))),
+                onChanged: (v) => setStateDialog(() => mes = v!),
+              ),
+              const Text('/'),
+              DropdownButton<int>(
+                value: ano,
+                items: List.generate(10, (i) => DropdownMenuItem(value: 2024+i, child: Text((2024+i).toString()))),
+                onChanged: (v) => setStateDialog(() => ano = v!),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+            ElevatedButton(
+              onPressed: () {
+                setState(() => _mesPendencia = DateTime(ano, mes, 1));
+                Navigator.pop(ctx);
+                _calcularPendencias();
+              },
+              child: const Text('Aplicar')
+            )
+          ],
+        )
+      )
+    );
+  }
+
+  Future<void> _exportarPendenciasPDF() async {
+    setState(() => _exportando = true);
+    try {
+      final pdf = pw.Document();
+      String dataHoraAtual = DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now());
+      String mesFormatado = DateFormat('MM/yyyy').format(_mesPendencia);
+      
+      List<List<String>> tableData = [];
+      List<String> rotasComPendencia = _resultadoPendencias.keys.toList()..sort((a, b) => (int.tryParse(a) ?? 0).compareTo(int.tryParse(b) ?? 0));
+      
+      for (String rota in rotasComPendencia) {
+        int totalRota = _totalSemaforosPorRota[rota] ?? 0;
+        for (var dia in _resultadoPendencias[rota]!) {
+          tableData.add([
+            'Rota $rota',
+            totalRota.toString(),
+            dia['dia_str'],
+            dia['qtd'].toString(),
+            dia['ids']
+          ]);
+        }
+      }
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4.landscape,
+          margin: const pw.EdgeInsets.all(24),
+          footer: (pw.Context ctx) => _buildRodapePDF(ctx, dataHoraAtual),
+          build: (pw.Context context) {
+            return [
+              pw.Text('RELATÓRIO DE PENDÊNCIAS', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+              pw.Text('Mês de Referência: $mesFormatado', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600)),
+              pw.SizedBox(height: 10),
+              pw.TableHelper.fromTextArray(
+                context: context,
+                headers: ['Rota', 'Total Rota', 'Data', 'Qtd Pendentes', 'Semáforos (IDs)'],
+                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 10),
+                headerDecoration: const pw.BoxDecoration(color: PdfColors.red800),
+                cellStyle: const pw.TextStyle(fontSize: 9),
+                cellAlignment: pw.Alignment.centerLeft,
+                data: tableData,
+                columnWidths: {
+                  0: const pw.FixedColumnWidth(50),
+                  1: const pw.FixedColumnWidth(60),
+                  2: const pw.FixedColumnWidth(60),
+                  3: const pw.FixedColumnWidth(80),
+                  4: const pw.FlexColumnWidth(),
+                }
+              )
+            ];
+          }
+        )
+      );
+      await Printing.layoutPdf(onLayout: (format) async => pdf.save(), name: 'Pendencias_$mesFormatado.pdf');
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _exportando = false);
+    }
+  }
+
+  Future<void> _exportarPendenciasExcel() async {
+    setState(() => _exportando = true);
+    try {
+      var excel = Excel.createExcel();
+      Sheet sheetObject = excel['Pendencias'];
+      excel.setDefaultSheet('Pendencias');
+      String mesFormatado = DateFormat('MM/yyyy').format(_mesPendencia);
+
+      sheetObject.appendRow([TextCellValue('RELATÓRIO DE PENDÊNCIAS')]);
+      sheetObject.appendRow([TextCellValue('MÊS:'), TextCellValue(mesFormatado)]);
+      sheetObject.appendRow([TextCellValue('')]);
+
+      sheetObject.appendRow([
+        TextCellValue('ROTA'),
+        TextCellValue('TOTAL CADASTRADO'),
+        TextCellValue('DATA'),
+        TextCellValue('QTD PENDENTES'),
+        TextCellValue('SEMAFOROS PENDENTES')
+      ]);
+
+      List<String> rotasComPendencia = _resultadoPendencias.keys.toList()..sort((a, b) => (int.tryParse(a) ?? 0).compareTo(int.tryParse(b) ?? 0));
+      
+      for (String rota in rotasComPendencia) {
+        int totalRota = _totalSemaforosPorRota[rota] ?? 0;
+        for (var dia in _resultadoPendencias[rota]!) {
+          sheetObject.appendRow([
+            TextCellValue(rota),
+            IntCellValue(totalRota),
+            TextCellValue(dia['dia_str']),
+            IntCellValue(dia['qtd']),
+            TextCellValue(dia['ids'])
+          ]);
+        }
+      }
+
+      if (excel.tables.keys.contains('Sheet1')) {
+        excel.delete('Sheet1');
+      }
+
+      var fileBytes = excel.encode();
+      if (fileBytes != null) {
+        String nomeArquivo = 'Pendencias_${mesFormatado.replaceAll('/', '-')}.xlsx';
+        final xFile = XFile.fromData(
+          Uint8List.fromList(fileBytes),
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          name: nomeArquivo
+        );
+        await Share.shareXFiles([xFile], text: 'Planilha de Pendências gerada pelo SOS.');
+      }
+    } catch (e) {
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao exportar Excel: $e'), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _exportando = false);
+    }
+  }
+
+  Widget _buildAbaPendencias() {
+    List<String> rotasComPendencia = _resultadoPendencias.keys.toList()..sort((a, b) => (int.tryParse(a) ?? 0).compareTo(int.tryParse(b) ?? 0));
+
+    return Column(
+      children: [
+        Container(
+          color: Colors.red.shade50, padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              const Text('Controle de Pendências', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(backgroundColor: Colors.white),
+                      icon: const Icon(Icons.calendar_month),
+                      label: Text(DateFormat('MM/yyyy').format(_mesPendencia), style: const TextStyle(fontWeight: FontWeight.bold)),
+                      onPressed: _escolherMesPendencia,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white),
+                      icon: _calculandoPendencias ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.search),
+                      label: const Text('Calcular'),
+                      onPressed: _calculandoPendencias ? null : _calcularPendencias,
+                    ),
+                  )
+                ],
+              )
+            ],
+          ),
+        ),
+        
+        if (rotasComPendencia.isNotEmpty && !_calculandoPendencias)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white),
+                    icon: _exportando ? const SizedBox(width:16,height:16,child:CircularProgressIndicator(color:Colors.white,strokeWidth:2)) : const Icon(Icons.picture_as_pdf),
+                    label: const Text('PDF'),
+                    onPressed: _exportando ? null : _exportarPendenciasPDF,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700, foregroundColor: Colors.white),
+                    icon: _exportando ? const SizedBox.shrink() : const Icon(Icons.grid_on),
+                    label: const Text('PLANILHA'),
+                    onPressed: _exportando ? null : _exportarPendenciasExcel,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        Expanded(
+          child: _calculandoPendencias 
+            ? const Center(child: Text('Cruzando dados de metas e vistorias... aguarde.'))
+            : rotasComPendencia.isEmpty
+              ? const Center(child: Text('Nenhuma pendência encontrada para este mês.', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 16)))
+              : ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: rotasComPendencia.length,
+                  itemBuilder: (context, index) {
+                    String rota = rotasComPendencia[index];
+                    List<Map<String, dynamic>> dias = _resultadoPendencias[rota]!;
+                    
+                    int totalRota = _totalSemaforosPorRota[rota] ?? 0;
+                    int totalPendenteMes = dias.fold(0, (acc, item) => acc + (item['qtd'] as int));
+
+                    return Card(
+                      elevation: 2, margin: const EdgeInsets.only(bottom: 12),
+                      shape: RoundedRectangleBorder(side: BorderSide(color: Colors.red.shade200), borderRadius: BorderRadius.circular(8)),
+                      child: ExpansionTile(
+                        leading: CircleAvatar(backgroundColor: Colors.red.shade100, child: Text(rota, style: TextStyle(color: Colors.red.shade900, fontWeight: FontWeight.bold))),
+                        title: Text('Rota $rota', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text('Total cadastrado: $totalRota | Faltaram $totalPendenteMes no mês', style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold)),
+                        children: dias.map((dia) {
+                          return Container(
+                            color: Colors.grey.shade50,
+                            child: ListTile(
+                              title: Text('Dia ${dia['dia_str']} - ${dia['qtd']} pendente(s)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                              subtitle: Text(dia['ids'], style: const TextStyle(color: Colors.blueGrey)),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    );
+                  },
+                ),
+        )
+      ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    // ==== AQUI FOI ALTERADA A COLEÇÃO PARA "vistoria" ====
-    Query queryConsulta = FirebaseFirestore.instance.collection('vistoria').orderBy('criado_em', descending: true);
-    if (_deConsulta != null && _ateConsulta != null) queryConsulta = queryConsulta.where('criado_em', isGreaterThanOrEqualTo: _deConsulta, isLessThanOrEqualTo: _ateConsulta);
+    if (_carregandoPerfil) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Relatórios e Exportações', style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.blue.shade500,
+        title: const Text('Relatórios Gerenciais', style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.blue.shade700,
         foregroundColor: Colors.white,
-        actions: const [MenuUsuario()], // MENU ADICIONADO AQUI
+        actions: const [MenuUsuario()],
         bottom: TabBar(
-          controller: _tabController, labelColor: Colors.white, unselectedLabelColor: Colors.white60, indicatorColor: Colors.white,
-          tabs: const [ Tab(icon: Icon(Icons.list_alt), text: 'Consulta'), Tab(icon: Icon(Icons.download), text: 'Exportação'), Tab(icon: Icon(Icons.warning_amber_rounded), text: 'Pendências') ],
+          controller: _tabController,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white60,
+          indicatorColor: Colors.white,
+          tabs: const [
+            Tab(icon: Icon(Icons.traffic), text: 'Semáforo'),
+            Tab(icon: Icon(Icons.route), text: 'Rotas'),
+            Tab(icon: Icon(Icons.warning_amber), text: 'Pendências'),
+          ],
         ),
       ),
-      
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('rotas').orderBy('numero').snapshots(),
-        builder: (context, snapshotRotas) {
-          if (!snapshotRotas.hasData) return const Center(child: CircularProgressIndicator());
-          List<String> listaRotasOptions = ['Todas'];
-          listaRotasOptions.addAll(snapshotRotas.data!.docs.map((r) => r['numero'].toString()));
-
-          return StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('semaforos').snapshots(),
-            builder: (context, snapshotSemaforos) {
-              if (!snapshotSemaforos.hasData) return const Center(child: CircularProgressIndicator());
-
-              Map<String, String> mapaRotasSemaforos = {};
-              List<Map<String, dynamic>> todosSemaforosData = [];
-              for (var doc in snapshotSemaforos.data!.docs) {
-                var data = doc.data() as Map<String, dynamic>;
-                mapaRotasSemaforos[data['id'].toString()] = (data['rota'] ?? '').toString().replaceFirst(RegExp(r'^0+'), ''); 
-                todosSemaforosData.add(data);
-              }
-
-              return TabBarView(
-                controller: _tabController,
-                children: [
-                  
-                  // ================= ABA 1: CONSULTA =================
-                  Column(
-                    children: [
-                      Container(
-                        color: Colors.blue.shade50, padding: const EdgeInsets.all(16),
-                        child: Column(
-                          children: [
-                            Row(children: [ _buildBotaoData('De', _deConsulta, () => _selecionarData(context, isDe: true, tipoAba: 'Consulta')), const SizedBox(width: 8), _buildBotaoData('Até', _ateConsulta, () => _selecionarData(context, isDe: false, tipoAba: 'Consulta')) ]),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(
-                                  flex: 1,
-                                  child: InputDecorator(
-                                    decoration: InputDecoration(labelText: 'Rota', filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4)),
-                                    child: DropdownButtonHideUnderline(
-                                      child: DropdownButton<String>(
-                                        isExpanded: true, value: listaRotasOptions.contains(_rotaConsulta) ? _rotaConsulta : 'Todas',
-                                        items: listaRotasOptions.map((r) => DropdownMenuItem(value: r, child: Text(r == 'Todas' ? 'Todas Rotas' : 'Rota $r'))).toList(),
-                                        onChanged: (val) => setState(() { _rotaConsulta = val!; _filtrosAplicadosConsulta = false; }),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  flex: 1,
-                                  child: TextField(
-                                    controller: _semaforoController, onChanged: (val) => setState(() => _filtrosAplicadosConsulta = false),
-                                    decoration: InputDecoration(labelText: 'Nº Semáforo', filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
-                                onPressed: () {
-                                  if (_deConsulta == null || _ateConsulta == null) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preencha a data De e Até!'), backgroundColor: Colors.orange)); return; }
-                                  setState(() => _filtrosAplicadosConsulta = true);
-                                },
-                                child: const Text('Aplicar Filtros', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                              ),
-                            ),
-                            if (_deConsulta != null || _ateConsulta != null || _rotaConsulta != 'Todas' || _semaforoController.text.isNotEmpty) ...[
-                              TextButton.icon(style: TextButton.styleFrom(foregroundColor: Colors.red), icon: const Icon(Icons.clear), label: const Text('Limpar Filtros', style: TextStyle(fontWeight: FontWeight.bold)), onPressed: _limparFiltrosConsulta)
-                            ]
-                          ],
-                        ),
-                      ),
-                      
-                      Expanded(
-                        child: !_filtrosAplicadosConsulta 
-                          ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [ Icon(Icons.manage_search, size: 80, color: Colors.grey.shade400), const SizedBox(height: 16), const Text('Preencha os filtros acima e clique em Aplicar.', style: TextStyle(color: Colors.grey, fontSize: 16)) ]))
-                          : StreamBuilder<QuerySnapshot>(
-                              stream: queryConsulta.snapshots(),
-                              builder: (context, snapshotVistorias) {
-                                if (snapshotVistorias.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-                                var vistorias = snapshotVistorias.data!.docs;
-                                String textoPesquisa = _semaforoController.text.trim().toLowerCase();
-                                if (textoPesquisa.isNotEmpty) vistorias = vistorias.where((doc) => (doc['semaforo_id'] ?? '').toString().toLowerCase().contains(textoPesquisa)).toList();
-                                if (_rotaConsulta != 'Todas') {
-                                  String rotaLimpa = _rotaConsulta.replaceFirst(RegExp(r'^0+'), '');
-                                  vistorias = vistorias.where((doc) => (mapaRotasSemaforos[doc['semaforo_id'].toString()] ?? '') == rotaLimpa).toList();
-                                }
-                                if (vistorias.isEmpty) return const Center(child: Text('Nenhuma vistoria encontrada para estes filtros.', style: TextStyle(color: Colors.grey, fontSize: 16)));
-
-                                return ListView.builder(
-                                  padding: const EdgeInsets.all(12), itemCount: vistorias.length,
-                                  itemBuilder: (context, index) {
-                                    var vistoria = vistorias[index].data() as Map<String, dynamic>;
-                                    String idSemaforo = vistoria['semaforo_id']?.toString() ?? 'S/N';
-                                    String uidVistoriador = vistoria['vistoriador_uid'] ?? '';
-                                    bool temFalha = vistoria['teve_anormalidade'] == true;
-                                    String rotaExibicao = mapaRotasSemaforos[idSemaforo] ?? 'Sem Rota';
-                                    Color corFundo = temFalha ? Colors.red.shade50 : Colors.green.shade50;
-                                    Color corIcone = temFalha ? Colors.red.shade700 : Colors.green.shade700;
-
-                                    return FutureBuilder<String>(
-                                      future: _getNomeVistoriador(uidVistoriador),
-                                      builder: (context, snapshotNome) {
-                                        String nome = snapshotNome.data ?? 'Carregando...';
-                                        return Card(
-                                          color: corFundo, elevation: 1, margin: const EdgeInsets.only(bottom: 8),
-                                          child: ListTile(
-                                            leading: CircleAvatar(backgroundColor: corIcone, child: Text(idSemaforo, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))),
-                                            title: Text('Semáforo $idSemaforo (Rota $rotaExibicao)', style: TextStyle(fontWeight: FontWeight.bold, color: corIcone)),
-                                            subtitle: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Text(vistoria['semaforo_endereco'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis),
-                                                Text('Data: ${vistoria['data_hora_inicio'] ?? ''}', style: const TextStyle(fontSize: 12, color: Colors.black54)),
-                                                Text('Vistoriador: $nome', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
-                                              ],
-                                            ),
-                                            trailing: Icon(temFalha ? Icons.warning_amber_rounded : Icons.check_circle, color: corIcone),
-                                            onTap: () => _mostrarDetalhesVistoriaAnterior(vistoria, rotaExibicao, nome),
-                                          ),
-                                        );
-                                      }
-                                    );
-                                  },
-                                );
-                              }
-                            ),
-                      )
-                    ],
-                  ),
-
-                  // ================= ABA 2: EXPORTAÇÃO =================
-                  Padding(
-                    padding: const EdgeInsets.all(24.0),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Text('Filtros para Exportação', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueGrey), textAlign: TextAlign.center),
-                        const SizedBox(height: 24),
-                        Row(children: [ _buildBotaoData('De', _deExport, () => _selecionarData(context, isDe: true, tipoAba: 'Exportacao')), const SizedBox(width: 8), _buildBotaoData('Até', _ateExport, () => _selecionarData(context, isDe: false, tipoAba: 'Exportacao')) ]),
-                        const SizedBox(height: 16),
-                        InputDecorator(
-                          decoration: InputDecoration(labelText: 'Escolha a Rota', filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              isExpanded: true, value: listaRotasOptions.contains(_rotaExport) ? _rotaExport : 'Selecione',
-                              items: [ const DropdownMenuItem(value: 'Selecione', child: Text('Selecione uma rota...')), ...listaRotasOptions.map((r) => DropdownMenuItem(value: r, child: Text(r == 'Todas' ? 'Todas as Rotas' : 'Rota $r'))) ],
-                              onChanged: (val) => setState(() => _rotaExport = val!),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 48),
-                        Builder(
-                          builder: (context) {
-                            bool liberado = _deExport != null && _ateExport != null && _rotaExport != 'Selecione';
-                            return Column(
-                              children: [
-                                SizedBox(width: double.infinity, height: 60, child: ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade600, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), icon: const Icon(Icons.picture_as_pdf, size: 28), label: const Text('Exportar PDF', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), onPressed: liberado ? () => _realizarExportacao('PDF', mapaRotasSemaforos) : null)),
-                                const SizedBox(height: 16),
-                                SizedBox(width: double.infinity, height: 60, child: ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade600, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), icon: const Icon(Icons.grid_on, size: 28), label: const Text('Exportar Excel', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), onPressed: liberado ? () => _realizarExportacao('EXCEL', mapaRotasSemaforos) : null)),
-                                if (!liberado) ...[ const SizedBox(height: 16), const Text('Preencha as datas e selecione a rota para liberar a exportação.', textAlign: TextAlign.center, style: TextStyle(color: Colors.red, fontStyle: FontStyle.italic)) ]
-                              ],
-                            );
-                          }
-                        )
-                      ],
-                    ),
-                  ),
-
-                  // ================= ABA 3: PENDÊNCIAS =================
-                  Column(
-                    children: [
-                      Container(
-                        color: Colors.red.shade50, padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Semáforos não vistoriados no Mês', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.red)),
-                            const SizedBox(height: 4),
-                            const Text('Verifique os semáforos que ficaram o mês inteiro sem vistoria.', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                _buildBotaoData('Mês', _mesPendencia, () => _selecionarMesAnoDialog(context), formato: 'MM/yyyy'),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: InputDecorator(
-                                    decoration: InputDecoration(labelText: 'Rota', filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4)),
-                                    child: DropdownButtonHideUnderline(
-                                      child: DropdownButton<String>(
-                                        isExpanded: true, value: listaRotasOptions.contains(_rotaPendencia) ? _rotaPendencia : 'Todas',
-                                        items: listaRotasOptions.map((r) => DropdownMenuItem(value: r, child: Text(r == 'Todas' ? 'Todas Rotas' : 'Rota $r'))).toList(),
-                                        onChanged: (val) => setState(() { _rotaPendencia = val!; }),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      
-                      Expanded(
-                        child: StreamBuilder<QuerySnapshot>(
-                          // ==== AQUI FOI ALTERADA A COLEÇÃO PARA "vistoria" ====
-                          stream: FirebaseFirestore.instance.collection('vistoria')
-                            .where('criado_em', isGreaterThanOrEqualTo: DateTime(_mesPendencia.year, _mesPendencia.month, 1))
-                            .where('criado_em', isLessThanOrEqualTo: DateTime(_mesPendencia.year, _mesPendencia.month + 1, 0, 23, 59, 59))
-                            .snapshots(),
-                          builder: (context, snapshotVistoriasDoMes) {
-                            if (snapshotVistoriasDoMes.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-
-                            Set<String> idsVistoriadosNoMes = snapshotVistoriasDoMes.data!.docs.map((doc) => doc['semaforo_id'].toString()).toSet();
-                            String rotaFiltro = _rotaPendencia.replaceFirst(RegExp(r'^0+'), '');
-
-                            Map<String, List<Map<String, dynamic>>> semaforosAgrupados = {};
-                            for (var sem in todosSemaforosData) {
-                              String rotaSem = (sem['rota'] ?? '').toString().replaceFirst(RegExp(r'^0+'), '');
-                              if (_rotaPendencia == 'Todas' || rotaSem == rotaFiltro) {
-                                if (!semaforosAgrupados.containsKey(rotaSem)) semaforosAgrupados[rotaSem] = [];
-                                semaforosAgrupados[rotaSem]!.add(sem);
-                              }
-                            }
-
-                            Map<String, List<Map<String, dynamic>>> pendentesPorRota = {};
-                            Map<String, Map<String, dynamic>> statsPorRota = {};
-                            int totalPendentes = 0;
-
-                            for (var rota in semaforosAgrupados.keys) {
-                              var semaforosDaRota = semaforosAgrupados[rota]!;
-                              int totalRota = semaforosDaRota.length;
-                              
-                              List<Map<String, dynamic>> omitidos = semaforosDaRota.where((s) => !idsVistoriadosNoMes.contains(s['id'].toString())).toList();
-                              
-                              if (omitidos.isNotEmpty) {
-                                pendentesPorRota[rota] = omitidos;
-                                totalPendentes += omitidos.length;
-                              }
-
-                              int qtdOmitidos = omitidos.length;
-                              int qtdVistoriados = totalRota - qtdOmitidos;
-
-                              statsPorRota[rota] = {
-                                'total': totalRota,
-                                'vistoriados': qtdVistoriados,
-                                'omitidos': qtdOmitidos,
-                                'perc_vistoriados': totalRota == 0 ? 0.0 : (qtdVistoriados / totalRota) * 100,
-                                'perc_omitidos': totalRota == 0 ? 0.0 : (qtdOmitidos / totalRota) * 100,
-                              };
-                            }
-
-                            var rotasOrdenadas = pendentesPorRota.keys.toList()..sort((a,b) => (int.tryParse(a) ?? 0).compareTo(int.tryParse(b) ?? 0));
-                            String mesFormatado = DateFormat('MM/yyyy').format(_mesPendencia);
-
-                            return Column(
-                              children: [
-                                Container(
-                                  width: double.infinity, padding: const EdgeInsets.all(8), color: Colors.grey.shade200,
-                                  child: Text('Total Geral de Semáforos não vistoriados no Mês: $totalPendentes', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red.shade800)),
-                                ),
-                                Expanded(
-                                  child: rotasOrdenadas.isEmpty
-                                    ? const Center(child: Text('Todos semáforos vistoriados no mês! Meta 100% cumprida.', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)))
-                                    : ListView.builder(
-                                        padding: const EdgeInsets.all(12),
-                                        itemCount: rotasOrdenadas.length,
-                                        itemBuilder: (context, index) {
-                                          String rotaListada = rotasOrdenadas[index];
-                                          var semaforosDessaRota = pendentesPorRota[rotaListada]!;
-                                          var stats = statsPorRota[rotaListada]!;
-                                          
-                                          String idsPendentes = semaforosDessaRota.map((s) => s['id']).join(', ');
-
-                                          return Card(
-                                            margin: const EdgeInsets.only(bottom: 8),
-                                            child: Padding(
-                                              padding: const EdgeInsets.all(16.0),
-                                              child: Row(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  CircleAvatar(
-                                                    radius: 26,
-                                                    backgroundColor: Colors.red.shade100, 
-                                                    child: Text(rotaListada, style: TextStyle(color: Colors.red.shade900, fontWeight: FontWeight.bold, fontSize: 18))
-                                                  ),
-                                                  const SizedBox(width: 16),
-                                                  Expanded(
-                                                    child: Column(
-                                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                                      children: [
-                                                        Row(
-                                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                                          children: [
-                                                            Text('Vistoriados: ${stats['vistoriados']} (${stats['perc_vistoriados'].toStringAsFixed(1)}%)', style: TextStyle(color: Colors.green.shade700, fontWeight: FontWeight.bold, fontSize: 12)),
-                                                            Text('Pendentes: ${stats['omitidos']} (${stats['perc_omitidos'].toStringAsFixed(1)}%)', style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold, fontSize: 12)),
-                                                          ],
-                                                        ),
-                                                        const Divider(height: 16),
-                                                        const Text('Semáforos Não Vistoriados:', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                                                        const SizedBox(height: 4),
-                                                        Text(idsPendentes, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87)),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                ),
-                                if (rotasOrdenadas.isNotEmpty)
-                                  Container(
-                                    padding: const EdgeInsets.all(16),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          child: ElevatedButton.icon(
-                                            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade700, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), padding: const EdgeInsets.symmetric(vertical: 14)),
-                                            icon: const Icon(Icons.picture_as_pdf),
-                                            label: const Text('PDF', style: TextStyle(fontWeight: FontWeight.bold)),
-                                            onPressed: () => _exportarPendenciasPDF(pendentesPorRota, statsPorRota, mesFormatado),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: ElevatedButton.icon(
-                                            style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), padding: const EdgeInsets.symmetric(vertical: 14)),
-                                            icon: const Icon(Icons.grid_on),
-                                            label: const Text('Excel', style: TextStyle(fontWeight: FontWeight.bold)),
-                                            onPressed: () => _exportarPendenciasExcel(pendentesPorRota, statsPorRota, mesFormatado),
-                                          ),
-                                        )
-                                      ],
-                                    ),
-                                  )
-                              ],
-                            );
-                          }
-                        ),
-                      )
-                    ],
-                  ),
-
-                ],
-              );
-            }
-          );
-        }
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildAbaSemaforo(),
+          _buildAbaRotas(),
+          _buildAbaPendencias(),
+        ],
       ),
     );
   }
