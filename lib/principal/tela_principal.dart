@@ -104,7 +104,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return perfil.contains('operador central') || perfil.contains('callcenter');
         
       case 'mapa':
-        return perfil.contains('operador central') || perfil.contains('vistoriador') || perfil.contains('equipe tecnica');
+        return perfil.contains('operador central')|| perfil.contains('equipe tecnica');
         
       case 'relatorios':
         return perfil.contains('operador central');
